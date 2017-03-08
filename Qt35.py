@@ -23,6 +23,9 @@ import dateutil
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
 
 def say_out(xxx):
     # 错误提示
@@ -35,7 +38,9 @@ def process(y):
     switch_of_process = True
     rft = np.fft.rfft(y)
     rft[int(len(rft) / 5):] = 0
+    print('信号去噪结束')
     return np.fft.irfft(rft)
+
 
 
 class Example_Widget(QWidget):
@@ -175,7 +180,6 @@ class Tide(object):
                 if 'tide' in self.tide_sheet.columns.values:
                     if 'time' in self.tide_sheet.columns.values:
                         pass
-                        #############################################################
                     else:
                         say_out('Please Check Your Format of the Sheet')
             except:
@@ -209,16 +213,16 @@ class Tide(object):
 
             temp_data['diff'] = None
 
-            temp_data['raising_time'] = datetime.timedelta(0)
-            temp_data['ebb_time'] = datetime.timedelta(0)
+            temp_data['raising_time'] = None
+            temp_data['ebb_time'] = None
             for x in temp_data.ix[temp_data.if_max == True].format_time:
                 try:
                     temp_data.loc[x, 'raising_time'] = x - temp_data[
                         (temp_data.if_min == True) & (temp_data.format_time < x)].format_time.max()
                     temp_data.loc[x, 'diff'] = temp_data.loc[x, 'tide'] - temp_data.loc[temp_data[
                                                                                             (
-                                                                                            temp_data.if_min == True) & (
-                                                                                            temp_data.format_time < x)].format_time.max(), 'tide']
+                                                                                                temp_data.if_min == True) & (
+                                                                                                temp_data.format_time < x)].format_time.max(), 'tide']
                 except:
                     pass
 
@@ -227,12 +231,13 @@ class Tide(object):
                     temp_data.loc[x, 'ebb_time'] = x - temp_data[
                         (temp_data.if_max == True) & (temp_data.format_time < x)].format_time.max()
                     temp_data.loc[x, 'diff'] = temp_data.loc[temp_data[(temp_data.if_max == True) & (
-                    temp_data.format_time < x)].format_time.max(), 'tide'] - temp_data.loc[x, 'tide']
+                        temp_data.format_time < x)].format_time.max(), 'tide'] - temp_data.loc[x, 'tide']
                 except:
                     pass
-                ###############筛选极值
-            if temp_data['diff'].max() <50 :
-                temp_data['diff']=temp_data['diff']*100
+                    ###############筛选极值
+            if temp_data['diff'].max() < 50:
+                temp_data['diff'] = temp_data['diff'] * 100
+
             temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'diff'] = None
             temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'if_max'] = False
             temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'if_min'] = False
@@ -247,7 +252,7 @@ class Tide(object):
             temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'if_min'] = False
             temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'ebb_time'] = 0
 
-                ###############
+            ###############
             year_tide = []
             month_tide = []
             day_tide = []
@@ -261,40 +266,47 @@ class Tide(object):
             self.year[s] = year_tide
             self.month[s] = month_tide
             self.day[s] = day_tide
+            print(s+"站预处理结束")
 
-    def plot_tide_compare(self, site='DongShuiGang',start=20, long=10):
+    def plot_tide_compare(self, site='DongShuiGang', long=3, date1=None):
         temp_data = self.sitedata(site)
-        self.fig0, self.ax0 = plt.subplots(1, 1, figsize=(100, 10), dpi=300)
+        if date1 == None:
+            date1 = temp_data.format_time[1]
+
+        self.fig0, self.ax0 = plt.subplots(1, 1, figsize=(10 * long, 10), dpi=400)
         fig = self.fig0
         ax = self.ax0
         day = mdates.DayLocator()  # every day
-        hour = mdates.HourLocator()  # every month
+        hour = mdates.HourLocator()  # every hour
         dayFmt = mdates.DateFormatter('%m-%d')
-        self.tt1 = temp_data.ix[temp_data.if_max == True].format_time#高潮时刻
-        self.hh1 = temp_data.ix[temp_data.if_max == True].tide#高潮潮位
-        self.tt2 = temp_data.ix[temp_data.if_min == True].format_time#低潮时刻
-        self.hh2 = temp_data.ix[temp_data.if_min == True].tide#低潮时间
+        self.tt1 = temp_data.ix[temp_data.if_max == True].format_time  # 高潮时刻
+        self.hh1 = temp_data.ix[temp_data.if_max == True].tide  # 高潮潮位
+        self.tt2 = temp_data.ix[temp_data.if_min == True].format_time  # 低潮时刻
+        self.hh2 = temp_data.ix[temp_data.if_min == True].tide  # 低潮时间
 
-        line1, = ax.plot(temp_data.format_time, temp_data.tide_init, 'o', label='Init',color='yellow')
-        line2, = ax.plot(temp_data.format_time, temp_data.tide, linewidth=0.5, color='black', label='Processed')
+        line1, = ax.plot(temp_data.format_time, temp_data.tide_init, 'o', label='原始数据', color='yellow')
+        line2, = ax.plot(temp_data.format_time, temp_data.tide, linewidth=0.5, color='black', label='去噪以后的数据')
 
-        line3, = ax.plot(self.tt1, self.hh1, marker = '*', ls = '',color='red', label='Highest')
-        line4, = ax.plot(self.tt2, self.hh2, marker='*', ls = '',color='magenta', label='Lowest')
+        line3, = ax.plot(self.tt1, self.hh1, marker='*', ls='', color='red', label='高潮时刻')
+        line4, = ax.plot(self.tt2, self.hh2, marker='*', ls='', color='magenta', label='低潮时刻')
 
-        plt.xlim(temp_data.format_time[start], temp_data.format_time[start] + datetime.timedelta(days=long))
+        plt.xlim(date1, date1 + datetime.timedelta(days=long))
 
+        plt.title(site)
         ax.xaxis.set_major_locator(day)
         ax.xaxis.set_major_formatter(dayFmt)
+        ax.xaxis.set_minor_locator(hour)
         if (temp_data.time.max() - temp_data.time.min()).days < 60:
             ax.xaxis.set_minor_locator(hour)
-        ax.legend(handles=[line1, line2,line3,line4])
-        plt.savefig('拟合对比图-' + str(start) + '.png')
+        ax.legend(handles=[line1, line2, line3, line4])
+        plt.savefig('拟合对比图-' + date1.strftime('%Y-%m-%d') + '.png')
 
-    def data2(self):
+    def ata2(self):
         return self.data
 
-    def sitedata(self,sitename):
-        return  self.data.get(sitename)
+    def sitedata(self, sitename):
+        return self.data.get(sitename)
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
