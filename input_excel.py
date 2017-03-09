@@ -2,8 +2,10 @@ import sys
 import xlsxwriter
 import numpy
 import datetime
+import pycnnum
 sys.path.append('~/Qt35.py')
 import Qt35
+import lunardate
 class Put_tide_in(Qt35.Tide):
     def __init__(self,filename,outfile):
         chaoshi = "潮时"
@@ -142,12 +144,25 @@ class Put_tide_in(Qt35.Tide):
             'valign': 'vcenter',
             'align': 'center',
         })
+        format_l= excel_input.add_format({
+            'left': 1,
+        })
+        format_lb= excel_input.add_format({
+            'left': 1,
+            'bottom':1
+        })
         ###########################################################
         self.data = Qt35.Tide(filename)
         #########################################################################################################################
         x = self.data
-        m = lambda t: 0 if t.hour <= 12 else 2
-
+        #m = lambda t: 0 if t.hour <= 12 else 2
+        def check(i,t_all):
+            #t_all is a list
+            if i.date() in t_all:
+                return 2
+            else:
+                t_all.append(i.date())
+                return  0
         for site in x.data.keys():
             if x.data[site].tide.max() - x.data[site].tide.min() > 50:
                 alpha = 1
@@ -174,12 +189,16 @@ class Put_tide_in(Qt35.Tide):
                 ######补全星号
                 for ii in range(row1+6,row1+6+o_clock.index[1].daysinmonth):
                     for jj in range(1,35):
-                        sheet.write(ii,jj,'*',format_num)
+                        if jj == 33 or jj ==31 or jj == 29 or jj == 27:
+                            sheet.write(ii,jj,'**',format_num)
+                        else:
+                            sheet.write(ii, jj, '*', format_num)
                 #######################################################表头
                 for i in o_clock.index:
                     t = []
                     h = o_clock.get_value(i, 'tide') * alpha
                     sheet.write(row1 + 5 + i.day, 0, i.date(), format_date)
+                    sheet.write(row1 + 5 + i.day, 35,self.solar2lunar_d(i), format_cn)
                     sheet.write(row1 + 5 + i.day, i.hour + 1, h, format_num)
                     t.append(h)  # 当天的
                     o_clock['day'] = o_clock.index.day
@@ -201,52 +220,55 @@ class Put_tide_in(Qt35.Tide):
                 self.low = mon.loc[mon.groupby(mon.if_min).groups[True], ['tide', 'format_time', 'ebb_time']]
                 low = self.low
                 t1 = 0
+                t_count = []
                 print('=高潮汇总================================')
                 for i in high.dropna().index:
-                    sheet.write(row1 + 5 + i.day, 27 + m(i), i, format_time)
-                    sheet.write(row1 + 5 + i.day, 28 + m(i), high.loc[i,['tide'] ] * alpha, format_num)
+                    move1= check(i,t_count)#是否向右移动
+                    sheet.write(row1 + 5 + i.day, 27 + move1, i, format_time)
+                    if i == high.tide.idxmax():
+                        sheet.write(row1 + 5 + i.day, 28 + move1, high.loc[i, ['tide']] * alpha, format_num_r)
+                    else:
+                        sheet.write(row1 + 5 + i.day, 28 + move1, high.loc[i,['tide'] ] * alpha, format_num)
                     t1 += (high.loc[i, 'raising_time']).total_seconds()
                     print(high.loc[i])
                 t1 = t1/len(high.dropna().index)
-                sheet.write(row1 + 5 + high.tide.idxmax().day, 28 + m(high.tide.idxmax()), high.tide.max() * alpha,
-                            format_num_r)
                 sheet.write(row1 + 6 + i.daysinmonth, 2, '月 最 高 高 潮 = ' + str(int(high.tide.max() * alpha)),
                             format_cn_a_left)
-                sheet.write(row1 + 7 + i.daysinmonth, 2, '潮 时 = ' + high.tide.idxmax().strftime('%H:%M:%S'),
+                sheet.write(row1 + 7 + i.daysinmonth, 2, '潮 时 = ' + str(high.tide.idxmax().month)+'月'+str(high.tide.idxmax().day)+'日'+str(high.tide.idxmax().hour)+'时'+str(high.tide.idxmax().minute)+'分',
                             format_cn_a_left)
 
-                sheet.write(row1 + 8 + i.daysinmonth, 2, '平均涨潮历时:' + str(int(divmod(t1,3600)[0])) + '小时' + str(int(divmod(t1,3600)[1])) + '分钟',
+                sheet.write(row1 + 8 + i.daysinmonth, 2, '平均涨潮历时:' + str(int(divmod(t1,3600)[0])) + '小时' + str(int(divmod(t1,3600)[1]/60)) + '分钟',
                             format_cn_a_left1)
 
                 sheet.merge_range(row1 + 8 + i.daysinmonth, 21, row1 + 8 + i.daysinmonth, 25, '月平均高潮潮高=',
                                   format_cn_a_right1)
                 sheet.write(row1 + 8 + i.daysinmonth, 26, int(alpha * high.tide.mean()), format_cn_a_left1)
                 t2 = 0
+                t_count = []
                 print('=低潮汇总================================')
                 for i in low.dropna().index:
-                    sheet.write(row1 + 5 + i.day, 31 + m(i), i, format_time)
-                    sheet.write(row1 + 5 + i.day, 32 + m(i), low.loc[i, 'tide'] * alpha, format_num)
+                    move1 = check(i, t_count)
+                    sheet.write(row1 + 5 + i.day, 31 + move1, i, format_time)
+                    if i ==low.tide.idxmin():
+                        sheet.write(row1 + 5 + i.day, 32 + move1, low.loc[i, 'tide'] * alpha, format_num_r)
+                    else:
+                        sheet.write(row1 + 5 + i.day, 32 + move1, low.loc[i, 'tide'] * alpha, format_num)
                     t2 += (low.loc[i, 'ebb_time']).total_seconds()
                     print('=================================')
-
                     print(low.loc[i])
-                    print(low.loc[i, 'ebb_time'].total_seconds())
-                print(len(low.index))
                 t2 = t2/len(low.dropna().index)
-
-                sheet.write(row1 + 5 + low.tide.idxmin().day, 32 + m(low.tide.idxmin()), low.tide.min() * alpha,
-                            format_num_r)
                 sheet.write(row1 + 6 + i.daysinmonth, 9, '月 最 低 低 潮 = ' + str(int(low.tide.min() * alpha)),
                             format_cn_a_left)
-                sheet.write(row1 + 7 + i.daysinmonth, 9, '潮 时 = ' + low.tide.idxmin().strftime('%H:%M:%S'),
+
+                sheet.write(row1 + 7 + i.daysinmonth, 9, '潮 时 = ' + str(high.tide.idxmin().month)+'月'+str(high.tide.idxmin().day)+'日'+str(high.tide.idxmin().hour)+'时'+str(high.tide.idxmin().minute)+'分',
                             format_cn_a_left)
 
                 print(t2)
-                sheet.write(row1 + 8 + i.daysinmonth, 9, '平均落潮历时:' +str(int(divmod(t2,3600)[0])) + '小时' + str(int(divmod(t2,3600)[1])) + '分钟',
+                sheet.write(row1 + 8 + i.daysinmonth, 9, '平均落潮历时:' +str(int(divmod(t2,3600)[0])) + '小时' + str(int(divmod(t2,3600/60)[1])) + '分钟',
                             format_cn_a_left1)
                 sheet.merge_range(row1 + 8 + i.daysinmonth, 27, row1 + 8 + i.daysinmonth, 32, '月平均低潮潮高=',
                                   format_cn_a_right2)
-                sheet.merge_range(row1 + 8 + i.daysinmonth, 33,row1 + 8 + i.daysinmonth,34, int(alpha * low.tide.mean()), format_cn_a_left2)
+                sheet.merge_range(row1 + 8 + i.daysinmonth, 33,row1 + 8 + i.daysinmonth,35, int(alpha * low.tide.mean()), format_cn_a_left2)
 ###############################################################################
                 sheet.write(row1 + 6 + i.daysinmonth, 15,
                             '月 平 均 潮 差 = ' + str(int(alpha *numpy.mean(mon['diff'].dropna().values))),
@@ -268,6 +290,13 @@ class Put_tide_in(Qt35.Tide):
                 sheet.merge_range(row1 + 7 + i.daysinmonth, 31, row1 + 7 + i.daysinmonth, 32,'=AVERAGE(AG' + str(r_1) + ':AG' + str(r_2) + ')', format_num)
                 sheet.merge_range(row1 + 6 + i.daysinmonth, 33, row1 + 6 + i.daysinmonth, 34,'=SUM(AI' + str(r_1) + ':AI' + str(r_2) + ')', format_num)
                 sheet.merge_range(row1 + 7 + i.daysinmonth, 33, row1 + 7 + i.daysinmonth, 34,'=AVERAGE(AI' + str(r_1) + ':AI' + str(r_2) + ')', format_num)
+############################
+                sheet.write_blank(row1 + 6 + i.daysinmonth, 35,None, format_num)
+                sheet.write_blank(row1 + 7 + i.daysinmonth, 35,None, format_num)
+#######
+                sheet.write_blank(row1 + 6 + i.daysinmonth,0,None,format_l)
+                sheet.write_blank(row1 + 7 + i.daysinmonth,0,None,format_l)
+                sheet.write_blank(row1 + 8 + i.daysinmonth,0,None,format_lb)
 
 ################################################################################标题
                 sheet.write(row1, 0, '潮位观测报表:', format_title1)
@@ -308,6 +337,7 @@ class Put_tide_in(Qt35.Tide):
                 sheet.write(row1 + 4, 34, chaogao, format_cn)
                 sheet.write(row1 + 5, 34, '', format_cn)
                 sheet.merge_range(row1 + 3, 35, row1 + 5, 35, '农历', format_cn)
+
                 #########################################底部划线
                 print('**********************************************')
                 print('正在写入'+site+'站第'+str(count)+'个月')
@@ -317,8 +347,21 @@ class Put_tide_in(Qt35.Tide):
     def data(self):
         return self.data
 
+    def solar2lunar_d(self,d):
+        #将阳历转化为阴历
+        #汉字格式改写
+        han_zi =  pycnnum.num2cn(lunardate.LunarDate.fromSolarDate(d.year, d.month, d.day).day)
+        han_zi = han_zi.replace('一十','十')
+        if len(han_zi) == 3:
+            return han_zi.replace('二十','廿')
+        if len(han_zi) == 1:
+            return '初'+han_zi
+        else:
+            return han_zi
     def file(self):
         return  self.file
     def high(self):
         return  self.high
 tide = Put_tide_in('test2.xlsx','输出.xlsx')
+
+
