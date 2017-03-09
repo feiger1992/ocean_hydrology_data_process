@@ -235,6 +235,7 @@ class Tide(object):
                 except:
                     pass
                     ###############筛选极值
+            #####根据潮差与涨落潮历时筛选
             if temp_data['diff'].max() < 50:
                 temp_data['diff'] = temp_data['diff'] * 100
 
@@ -252,7 +253,42 @@ class Tide(object):
             temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'if_min'] = False
             temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'ebb_time'] = 0
 
-            ###############
+            ###############根据大小潮个数筛选
+            switch = temp_data.ix[temp_data.if_min == True].append(temp_data.ix[temp_data.if_max == True]).sort_index().index
+            count_filtertime = 0
+            while len(temp_data.ix[temp_data.if_min==True]) !=  len(temp_data.ix[temp_data.if_max==True]):
+                print('低潮潮位个数'+str(len(temp_data.ix[temp_data.if_min==True]) ))
+                print('高潮潮位个数' + str(len(temp_data.ix[temp_data.if_max == True])))
+                print('进行高低潮筛选————————————————————————————————')
+                for i in range(1, len(switch) - 1):
+                    ## 时刻i是最大值时
+                    if (temp_data.loc[switch[i - 1], 'if_max'] and temp_data.loc[switch[i + 1], 'if_max']) or (
+                        temp_data.loc[switch[i - 1], 'if_min'] and temp_data.loc[switch[i + 1], 'if_min']):
+                        pass
+                    else:
+                        if temp_data.loc[switch[i], 'if_max']:  # 自身高潮
+                            if temp_data.loc[switch[i - 1], 'if_max']:  # 后一个也是高潮
+                                if temp_data.loc[switch[i], 'tide'] > temp_data.loc[switch[i - 1], 'tide']:  # 前面的i大,i-1为假
+                                    temp_data.loc[switch[i - 1], 'if_max'] = False
+                                    temp_data.loc[switch[i - 1], 'diff'] = None
+                                    temp_data.loc[switch[i - 1], 'raising_time'] = None
+                                else:
+                                    temp_data.loc[switch[i], 'if_max'] = False
+                                    temp_data.loc[switch[i ], 'diff'] = None
+                                    temp_data.loc[switch[i ], 'raising_time'] = None
+                        else:  # 自身低潮
+                            if temp_data.loc[switch[i - 1], 'if_min']:  # 后一个也是低潮
+                                if temp_data.loc[switch[i], 'tide'] < temp_data.loc[switch[i - 1], 'tide']:  # 前面的i较小,i-1为假
+                                    temp_data.loc[switch[i - 1], 'if_min'] = False
+                                    temp_data.loc[switch[i - 1], 'diff'] = False
+                                    temp_data.loc[switch[i - 1], 'ebb_time'] = False
+                                else:
+                                    temp_data.loc[switch[i], 'if_min'] = False
+                                    temp_data.loc[switch[i], 'diff'] = False
+                                    temp_data.loc[switch[i], 'ebb_time'] = False
+                switch = temp_data.ix[temp_data.if_min == True].append(
+                    temp_data.ix[temp_data.if_max == True]).sort_index().index
+                count_filtertime += 1
             year_tide = []
             month_tide = []
             day_tide = []
@@ -309,10 +345,12 @@ class Tide(object):
 
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    ex = Example_Widget()
-    ex.show()
-    ex.showMaximized()
-    sys.exit(app.exec_())
-    t = Tide(ex.fileName)
-    x = Tide('test2.xlsx')
+   app = QApplication(sys.argv)
+   ex = Example_Widget()
+   ex.show()
+   ex.showMaximized()
+   sys.exit(app.exec_())
+
+
+
+
