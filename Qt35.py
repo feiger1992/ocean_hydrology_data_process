@@ -169,7 +169,7 @@ class Example_Widget(QWidget):
 
 class Tide(object):
     def __init__(self, filename, time1=datetime.datetime(2000, 1, 1, 00, 0),
-                 time2=datetime.datetime(2016, 10, 16, 5, 0)):
+                 time2=datetime.datetime(2018, 10, 16, 5, 0)):
         self.data = {}
         self.year = {}
         self.month = {}
@@ -196,6 +196,8 @@ class Tide(object):
 
             temp_data['format_time'] = t
             temp_data['tide_init'] = temp_data.tide
+            if len(temp_data)%2  == 1:
+                temp_data = temp_data.ix[:-1]
             temp_data.tide = process(temp_data.tide)
             temp_data.index = temp_data['format_time']
 
@@ -289,6 +291,8 @@ class Tide(object):
                 switch = temp_data.ix[temp_data.if_min == True].append(
                     temp_data.ix[temp_data.if_max == True]).sort_index().index
                 count_filtertime += 1
+
+
             year_tide = []
             month_tide = []
             day_tide = []
@@ -298,10 +302,31 @@ class Tide(object):
                     month_tide.append(jj)
                     for iii, jjj in jj.groupby(jj.index.day):
                         day_tide.append(jjj)
+
             self.data[s] = temp_data
+            temp_data2 = temp_data
+            temp_data2['tide'] = temp_data['tide_init']
+            self.data[s+'原始数据'] = temp_data2
+
+            year_tide2 = []
+            month_tide2 = []
+            day_tide2 = []
+            for i, j in temp_data2.groupby(temp_data.index.year):  #
+                year_tide2.append(j)
+                for ii, jj in j.groupby(j.index.month):
+                    month_tide2.append(jj)
+                    for iii, jjj in jj.groupby(jj.index.day):
+                        day_tide2.append(jjj)
+
             self.year[s] = year_tide
+            self.year[s+'原始数据'] = year_tide2
+
             self.month[s] = month_tide
+            self.month[s+'原始数据'] = month_tide2
+
             self.day[s] = day_tide
+            self.day[s+'原始数据'] = day_tide2
+
             print(s+"站预处理结束")
 
     def plot_tide_compare(self, site='DongShuiGang', long=3, date1=None):

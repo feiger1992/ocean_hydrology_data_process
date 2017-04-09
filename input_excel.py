@@ -121,7 +121,7 @@ class Put_tide_in(Qt35.Tide):
         })
         format_time = excel_input.add_format({
             'border': 1,
-            'num_format': 'hh:mm',
+            'num_format': 'hhmm',
             'font_name': 'Times New Roman',
             'font_size': 7,
             'valign': 'vcenter',
@@ -176,6 +176,9 @@ class Put_tide_in(Qt35.Tide):
             sheet.set_column('Z:AI', 3.5)
             sheet.set_column('AJ:AJ', 5)
             ##############################
+            if max(x.data['Miandian'].index)-min(x.data['Miandian'].index) < datetime.timedelta(days=50):
+                x.month[site] = [((x.month[site][0]).append((x.month[site][1]))).sort_index()]
+
             for mon in x.month[site]:
 
                 row1 = count * 42
@@ -306,7 +309,7 @@ class Put_tide_in(Qt35.Tide):
                 sheet.write(row1 + 1, 16, '高程系统：原始数据高程', format_title2)
                 sheet.write(row1 + 2, 16,
                             '观测日期：' + mon.format_time.min().strftime('%Y/%m/%d') +'至'+ mon.format_time.max().strftime('%Y/%m/%d'),format_title2)
-                sheet.write(row1 + 1, 29, '测站：' + str(site), format_title2)
+                sheet.write(row1 + 1, 29, '测站：' + str(site).replace('原始数据',''), format_title2)
                 sheet.write(row1 + 2, 29, '单位：cm', format_title2)
                 sheet.write(row1 + 3, 0, chaoshi, format_cn_r)
                 sheet.write(row1 + 4, 0, chaogao, format_cn_lr)
