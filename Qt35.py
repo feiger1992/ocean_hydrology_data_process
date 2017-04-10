@@ -197,7 +197,7 @@ class Tide(object):
             temp_data['format_time'] = t
             temp_data['tide_init'] = temp_data.tide
             if len(temp_data)%2  == 1:
-                temp_data = temp_data.ix[:-1]
+                temp_data = temp_data.ix[0:(len(temp_data)-2)]
             temp_data.tide = process(temp_data.tide)
             temp_data.index = temp_data['format_time']
 
@@ -258,10 +258,16 @@ class Tide(object):
             ###############根据大小潮个数筛选
             switch = temp_data.ix[temp_data.if_min == True].append(temp_data.ix[temp_data.if_max == True]).sort_index().index
             count_filtertime = 0
-            while len(temp_data.ix[temp_data.if_min==True]) !=  len(temp_data.ix[temp_data.if_max==True]):
+            while (len(temp_data.ix[temp_data.if_min==True]) !=  len(temp_data.ix[temp_data.if_max==True])):
+
                 print('低潮潮位个数'+str(len(temp_data.ix[temp_data.if_min==True]) ))
                 print('高潮潮位个数' + str(len(temp_data.ix[temp_data.if_max == True])))
+                if ((len(temp_data.ix[temp_data.if_min==True])-len(temp_data.ix[temp_data.if_max==True]) ==1) or (len(temp_data.ix[temp_data.if_min==True])-len(temp_data.ix[temp_data.if_max==True])== -1)):
+                    print('极值只多一个，筛选结束')
+                    break
                 print('进行高低潮筛选————————————————————————————————')
+
+
                 for i in range(1, len(switch) - 1):
                     ## 时刻i是最大值时
                     if (temp_data.loc[switch[i - 1], 'if_max'] and temp_data.loc[switch[i + 1], 'if_max']) or (
