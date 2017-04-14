@@ -23,6 +23,7 @@ import dateutil
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
+import ttide as tt
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -195,10 +196,23 @@ class Tide(object):
                     t.append(dateutil.parser.parse(x))
 
             temp_data['format_time'] = t
-            temp_data['tide_init'] = temp_data.tide
+            temp_data['tide_init'] = temp_data.tide/100
+
+            if t[0]+(t[1]-t[0])*(len(t)-1) != t[len(t)-1]:
+                say_out(str(s)+'时间间隔有问题，请检查时间序列')
+
+            deltatime = t[1]-t[0]
+            num_time = np.linspace(0,len(t)*deltatime.total_seconds()/3600,len(t))
+
+            self.tide_info = tt.t_tide(temp_data['tide_init'].values,dt=deltatime.total_seconds()/3600)
+
+            #temp_data.tide = self.tide_info(num_time)
+
+            temp_data['tide_init'] = temp_data.tide#后续调和导出、根据调和分析对数据进行去噪-需要处理###
             if len(temp_data)%2  == 1:
                 temp_data = temp_data.ix[0:(len(temp_data)-2)]
             temp_data.tide = process(temp_data.tide)
+
             temp_data.index = temp_data['format_time']
 
             temp_data = temp_data.ix[temp_data.format_time <= time2]
@@ -375,12 +389,12 @@ class Tide(object):
         return self.data.get(sitename)
 
 
-if __name__ == '__main__':
+"""if __name__ == '__main__':
    app = QApplication(sys.argv)
    ex = Example_Widget()
    ex.show()
    ex.showMaximized()
-   sys.exit(app.exec_())
+   sys.exit(app.exec_())"""
 
 
 
