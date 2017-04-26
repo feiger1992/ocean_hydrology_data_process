@@ -270,7 +270,7 @@ class Put_tide_in(Qt35.Tide):
                     print(high.loc[i])
                 t1 = t1/len(high.dropna().index)
 
-                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(int(high.tide.max() * alpha)),
+                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(int(high.tide.max() )),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 2, '潮 时 = ' + str(high.tide.idxmax().month)+'月'+str(high.tide.idxmax().day)+'日'+str(high.tide.idxmax().hour)+'时'+str(high.tide.idxmax().minute)+'分',
@@ -301,7 +301,7 @@ class Put_tide_in(Qt35.Tide):
                     print('=================================')
                     print(low.loc[i])
                 t2 = t2/len(low.dropna().index)
-                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(int(low.tide.min() * alpha)),
+                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(int(low.tide.min() )),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 9, '潮 时 = ' + str(high.tide.idxmin().month)+'月'+str(high.tide.idxmin().day)+'日'+str(high.tide.idxmin().hour)+'时'+str(high.tide.idxmin().minute)+'分',
