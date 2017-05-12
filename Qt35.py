@@ -11,19 +11,16 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow, QLabel, QGridLayout
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QFileDialog
-import sys
 import xlrd
-
 import pandas
 import numpy as np
-
 import datetime
 import dateutil
-
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-
 import ttide as tt
+
+
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 

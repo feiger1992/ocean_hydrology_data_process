@@ -61,6 +61,7 @@ def get_single_file_name(filename):
     p1 = filename.rfind('\\')
     p2 = filename.rfind('.')
     return filename[p1+1:p2]
+
 def statistics(data,angle1,ang,zhang_or_luo = False):##zhang_or_luo为True时，angle为落潮流向,data为某一点报表格式,ang转流包括角度
 
     def is_time_of(d):
@@ -146,13 +147,13 @@ def statistics(data,angle1,ang,zhang_or_luo = False):##zhang_or_luo为True时，
                 'last_time1': reduce(operator.add, raise_times) / int(raise_time),
                 'last_time2': reduce(operator.add, ebb_times) / int(ebb_time)}
 
-    fenceng = dict(biaoceng = data[[0,1,2]],
-                  ceng2 = data[[0,3,4]],
-                  ceng4=data[[0,5,6]],
-                  ceng6=data[[0,7,8]],
-                  ceng8=data[[0,9,10]],
-                  diceng = data[[0,11,12]],
-                   ave = data[[0,15,16]])
+    fenceng = dict(biaoceng = data.iloc[:,[0,1,2]],
+                  ceng2 = data.iloc[:,[0,3,4]],
+                  ceng4=data.iloc[:,[0,5,6]],
+                  ceng6=data.iloc[:,[0,7,8]],
+                  ceng8=data.iloc[:,[0,9,10]],
+                  diceng = data.iloc[:,[0,11,12]],
+                   ave = data.iloc[:,[0,15,16]])
     max_1 = {}
     max_2 = {}
     for i in sorted(fenceng.keys()):
@@ -325,12 +326,17 @@ def diff_of_time(vec,ang_not_mag = True):##TO DO 应该从有效数据倒序对�
 
 def one_point_process(file,angle,ang):
     f = pandas.ExcelFile(file)
+    if len(f.sheet_names) ==1:
+        print('只有一个潮型')#可以加入判断是不是半月潮
     point_data = {'data_from_file':file}
 
     for i in  f.sheet_names:
         print('**********'+str(i)+'开始*********')
-        data = f.parse(i)
-        point_data.update({i:statistics(data,angle,ang)})
+        try:
+            data = f.parse(i)
+            point_data.update({i:statistics(data,angle,ang)})
+        except:
+            pass
         print('**********' + str(i)+'结束*********')
     return point_data
 
@@ -412,6 +418,7 @@ def out_put_to_excel(info_of_point_all_tides,file_name = '潮流统计信息.xls
 
 def output_format_Excel_1(all_data,output_filename ="测流资料流速统计.xlsx" ):#输出对应各层流速平均值、极值
     # all_data[点位][潮型][涨落潮极值][层数][max/mean]
+    #5-9更新可以写入不区分大小潮的涨落信息
     excel_input = xlsxwriter.Workbook(output_filename)
     format = excel_input.add_format({
         'border': 1,
@@ -421,13 +428,38 @@ def output_format_Excel_1(all_data,output_filename ="测流资料流速统计.xl
         'valign': 'vcenter',
         'align': 'center'
     })
-    def sheet_init():
+    def sheet_init(worksheet):
         worksheet.write(0, 0, '测站')
         for i,j in enumerate(['表层','0.2H','0.4H','0.6H','0.8H','底层','垂线平均']):
             worksheet.write(1, 2 * i + 1, '(cm/s)',format)
             worksheet.write(1, 2 * i + 2, '(°)',format)
             worksheet.write(0, 2 * i + 1, j,format)
             worksheet.write(0, 2 * i + 2, j,format)
+    def wirte(i, p, t=None):
+        for t_kind in ['raise_extreme', 'ebb_extreme']:
+            for iii, ceng in enumerate(['biaoceng', 'ceng2', 'ceng4', 'ceng6', 'ceng8', 'diceng', 'ave']):
+                for index, max_or_mean in enumerate(['流速最大值', '流速平均值']):
+                    if t:
+                        sheetname = trans(t + t_kind + max_or_mean)
+                    else:
+                        sheetname = trans(t_kind + max_or_mean)
+                    try:
+                        worksheet = excel_input.add_worksheet(name=sheetname)
+                        sheet_init(worksheet)
+                    except:
+                        worksheet = excel_input.get_worksheet_by_name(sheetname)
+                        worksheet.write(i + 2, 0, p, format)
+
+                    if index:
+                        v_d = ['mean', 'mean_d']
+                    else:
+                        v_d = ['max_v', 'max_d']
+                    if t:
+                        for index2, v_or_d in enumerate(v_d):
+                            worksheet.write(i + 2, iii * 2 + 1 + index2, all_data[p][t][t_kind][ceng][v_or_d], format)
+                    else:
+                        for index2, v_or_d in enumerate(v_d):
+                            worksheet.write(i + 2, iii * 2 + 1 + index2, all_data[p][t_kind][ceng][v_or_d], format)
     def trans(x):
         x = x.replace('da','大潮')
         x = x.replace('xiao','小潮')
@@ -436,65 +468,34 @@ def output_format_Excel_1(all_data,output_filename ="测流资料流速统计.xl
         x = x.replace('ebb_extreme', '落潮')
         return x
     for i,p in enumerate(sorted(all_data.keys())):
-        for t in ['da','zhong','xiao']:
-            for t_kind in ['raise_extreme','ebb_extreme']:
-                for iii,ceng in enumerate(['biaoceng', 'ceng2', 'ceng4', 'ceng6', 'ceng8', 'diceng','ave']):
-                    for index,max_or_mean in enumerate(['流速最大值','流速平均值']):
-
-                        sheetname = trans(t+t_kind+max_or_mean)
-                        try:
-                            worksheet = excel_input.add_worksheet(name=sheetname)
-                            sheet_init()
-                        except:
-                            worksheet = excel_input.get_worksheet_by_name(sheetname)
-                            worksheet.write(i+2,0,p,format)
-
-                        if index:
-                            v_d = ['mean','mean_d']
-                        else:
-                            v_d = ['max_v','max_d']
-
-                        for index2,v_or_d in enumerate(v_d):
-                            worksheet.write(i+2,iii*2+1+index2,all_data[p][t][t_kind][ceng][v_or_d],format)
-
-    excel_input.close()
-
+        try:
+            for t in ['da','zhong','xiao']:
+                wirte(i, p, t)
+        except KeyError:
+            excel_input.close()
+        except:
+            wirte(i, p)
 
 def output_format_Excel_2(all_data,output_filename ="测流资料历时统计.xlsx" ):#统计输出涨落潮历时
     excel_input = xlsxwriter.Workbook(output_filename)
     sheet = excel_input.add_worksheet('历时统计')
     for i, p in enumerate(sorted(all_data.keys())):
         sheet.write(2+i,0,p)
-        for ii,t in enumerate(['da', 'zhong', 'xiao']):
-            for index,r_e in enumerate(['raise_time','ebb_time']):
-                sheet.write(2+i,ii*2+1+index,str(all_data[p][t][r_e]['ave_last']).replace('0 days ',''))
+        try:
+            for ii,t in enumerate(['da', 'zhong', 'xiao']):
+                for index,r_e in enumerate(['raise_time','ebb_time']):
+                    sheet.write(2+i,ii*2+1+index,str(all_data[p][t][r_e]['ave_last']).replace('0 days ',''))
+        except:
+            for index, r_e in enumerate(['raise_time', 'ebb_time']):
+                sheet.write(2 + i,  2 + 1 + index, str(all_data[p][r_e]['ave_last']).replace('0 days ', ''))
     excel_input.close()
 
 all_data = {}
-for i in range(1,9):
-    angle=[126,117,136,142,119,105,140,172][i-1]
-    k = r"E:\★★★★★三航院项目\★★★★★鼠浪湖-2017-3月\测流资料整理\shulanghu\P"+str(i)+".xlsx"
-    point = one_point_process(k,angle,10)
+for i in [3]:
+    angle=136
+    k = r"E:\★★★★★三航院项目\★★★★★鼠浪湖-2017-3月\测流资料整理\半月\P3.xlsx"
+    point = one_point_process(k,angle,0)
     all_data.update({('P'+str(i)):point})
     print('*****OK*****'+str(i))
 
-#output_format_Excel_1(all_data)
 output_format_Excel_2(all_data)
-
-r"""
-f = pandas.ExcelFile(r"C:\Users\Feiger\Desktop\temp\ca.xlsx")
-e = f.parse('e')
-n = f.parse('n')
-vec = vec(e,n)
-dif1_a = diff_of_cell(vec)
-dif1_v = diff_of_cell(vec,False)
-
-dif2_a = diff_of_time(vec)
-dif2_v = diff_of_time(vec,False)
-
-for k in range(1,len(vec.index)):
-    dif1_a.iloc[k].values[1:15]
-def check_std(df,r,c,OK_col = 15):
-    print('***值为'+str((df.iloc[r].dropna().values[c])))
-    return (df.iloc[r].dropna().values[c]-df.iloc[r].dropna().values[:OK_col].mean())/df.iloc[r].dropna().values[:OK_col].std()
-"""
