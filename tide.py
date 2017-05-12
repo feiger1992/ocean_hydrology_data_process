@@ -289,7 +289,6 @@ class Tide(object):
             ss.to_excel(excel_writer,sheet_name=s)
         excel_writer.save()
 
-
 class Process_Tide(Tide):
     #    def __init__(self,filename):
     ###########################################################
@@ -456,7 +455,6 @@ class Process_Tide(Tide):
             sheet.set_column('Z:AI', 3.5)
             sheet.set_column('AJ:AJ', 5)
             ##############################
-
             if max(x.data[site].index) - min(x.data[site].index) < datetime.timedelta(days=50):
                 try:
                     x.month[site] = [((x.month[site][0]).append((x.month[site][1]))).sort_index()]
@@ -493,7 +491,6 @@ class Process_Tide(Tide):
                                 sheet.write(ii, jj, '**', format_num)
                             else:
                                 sheet.write(ii, jj, '*', format_num)
-                    hangshu = max(mon.index).daysinmonth
 
                 #######################################################表头
                 for i in o_clock.index:
@@ -520,7 +517,6 @@ class Process_Tide(Tide):
                     mm = gg.mean()
                     ss = gg.sum()
 
-
                     if len(x.month[site]) != 1:
                         sheet.write(row1 + 5 + i.day, 25, ss.get(i.day) * alpha, format_num)
                         sheet.write(row1 + 5 + i.day, 26, mm.get(i.day) * alpha, format_num)
@@ -529,18 +525,18 @@ class Process_Tide(Tide):
                     else:
                         sheet.write(row1 + 5 + hanghanghang, 25, ss.get(i.day) * alpha, format_num)
                         sheet.write(row1 + 5 + hanghanghang, 26, mm.get(i.day) * alpha, format_num)
-                        sheet.write(row1 + 5 + hangshu + 5, 21, '月 合 计 ', format_cn)
-                        sheet.write(row1 + 6 + hangshu + 5, 21, '月 平 均 ', format_cn)
-                if len(x.month[site]) == 1:
-                    hangshu = hangshu + 4  ###############只有一个月时应为2，多月分不知道
+                        sheet.write(row1 + 5 + hangshu + 1, 21, '月 合 计 ', format_cn)
+                        sheet.write(row1 + 6 + hangshu + 1, 21, '月 平 均 ', format_cn)
+                #if len(x.month[site]) == 1:
+                #    hangshu = hangshu + 4  ###############只有一个月时应为2，多月分不知道
 
                     ########底层画线
                 for ii in range(21):
                     sheet.write(row1 + 8 + hangshu, ii, None, format_cn_a_left1)
                 ####################################################高低潮位处理###################
-                self.high = mon.loc[mon.groupby(mon.if_max).groups[True], ['tide', 'format_time', 'raising_time']]
+                self.high = mon.loc[mon.groupby(mon.if_max).groups[True], ['tide', 'format_time']]
                 high = self.high
-                self.low = mon.loc[mon.groupby(mon.if_min).groups[True], ['tide', 'format_time', 'ebb_time']]
+                self.low = mon.loc[mon.groupby(mon.if_min).groups[True], ['tide', 'format_time']]
                 low = self.low
                 t1 = 0
                 t_count = []
@@ -558,13 +554,6 @@ class Process_Tide(Tide):
                         sheet.write(row1 + 5 + hanghanghang_1, 28 + move1, high.loc[i, ['tide']] * alpha, format_num_r)
                     else:
                         sheet.write(row1 + 5 + hanghanghang_1, 28 + move1, high.loc[i, ['tide']] * alpha, format_num)
-                    t1 += (high.loc[i, 'raising_time']).total_seconds()
-                    print(high.loc[i])
-                t1 = t1 / len(high.dropna().index)
-                # 只有一个月时无法对应#############
-                # if len(x.month[site]) == 1:
-                #    hangshu += 1
-                #   print('+++++')
 
                 sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(int(high.tide.max())),
                             format_cn_a_left)
@@ -573,6 +562,17 @@ class Process_Tide(Tide):
                             '潮 时 = ' + str(high.tide.idxmax().month) + '月' + str(high.tide.idxmax().day) + '日' + str(
                                 high.tide.idxmax().hour) + '时' + str(high.tide.idxmax().minute) + '分',
                             format_cn_a_left)
+
+                self.high = mon.loc[mon.groupby(mon.if_max).groups[True], ['tide', 'format_time', 'raising_time']]
+                high = self.high
+                for i in high.dropna().index:
+                    t1 += (high.loc[i, 'raising_time']).total_seconds()
+                    print(high.loc[i])
+                t1 = t1 / len(high.dropna().index)
+                # 只有一个月时无法对应#############
+                # if len(x.month[site]) == 1:
+                #    hangshu += 1
+                #   print('+++++')
 
                 sheet.write(row1 + 8 + hangshu, 2, '平均涨潮历时:' + str(int(divmod(t1, 3600)[0])) + '小时' + str(
                     int(divmod(t1, 3600)[1] / 60)) + '分钟',
@@ -596,10 +596,6 @@ class Process_Tide(Tide):
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num_r)
                     else:
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num)
-                    t2 += (low.loc[i, 'ebb_time']).total_seconds()
-                    print('=================================')
-                    print(low.loc[i])
-                t2 = t2 / len(low.dropna().index)
                 sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(int(low.tide.min())),
                             format_cn_a_left)
 
@@ -607,6 +603,14 @@ class Process_Tide(Tide):
                             '潮 时 = ' + str(high.tide.idxmin().month) + '月' + str(high.tide.idxmin().day) + '日' + str(
                                 high.tide.idxmin().hour) + '时' + str(high.tide.idxmin().minute) + '分',
                             format_cn_a_left)
+
+                self.low = mon.loc[mon.groupby(mon.if_min).groups[True], ['tide', 'format_time', 'ebb_time']]
+                low = self.low
+                for i in low.dropna().index:
+                    t2 += (low.loc[i, 'ebb_time']).total_seconds()
+                    print('=================================')
+                    print(low.loc[i])
+                t2 = t2 / len(low.dropna().index)
 
                 print(t2)
                 sheet.write(row1 + 8 + hangshu, 9, '平均落潮历时:' + str(int(divmod(t2, 3600)[0])) + '小时' + str(
@@ -740,6 +744,6 @@ if __name__ == "__main__":
     r"""t.display()
     with open(r"C:\Users\Feiger\Desktop\2.html", 'w') as f:
         f.write(t.html['P'])"""
-    t.output(r"C:\Users\Feiger\Desktop\33.xlsx")
+    t.output(r"C:\Users\Feiger\Desktop\22.xlsx")
     print('*****OK*****')
 
