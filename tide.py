@@ -34,7 +34,7 @@ def process(y):
     return np.fft.irfft(rft)
 
 class Tide(object):
-    def __init__(self, filename, time1=datetime.datetime(2000, 1, 1, 00, 0),
+    def __init__(self, filename, only_first_sheet = False,time1=datetime.datetime(2000, 1, 1, 00, 0),
                  time2=datetime.datetime(2018, 10, 16, 5, 0)):
         self.filename = filename
         self.time1 = time1
@@ -45,9 +45,11 @@ class Tide(object):
         self.day = {}
         self.html = {}
         self.sites = xlrd.open_workbook(filename=filename).sheet_names()
+        if only_first_sheet:
+            self.sites = self.sites[:1]
 
     def preprocess(self):
-        for s in xlrd.open_workbook(filename=self.filename).sheet_names():
+        for s in self.sites:
             try:
                 self.tide_sheet = pandas.read_excel(self.filename, sheetname=s)
                 if 'tide' in self.tide_sheet.columns.values:
@@ -230,9 +232,9 @@ class Tide(object):
 
     def harmonic_analysis(self, site, if_init=True):
         if if_init:
-            return tt.t_tide(self.data2()[site]['tide_init'], dt=self.deltatime.total_seconds() / 3600)
+            return tt.t_tide(self.data[site]['tide_init'], dt=self.deltatime.total_seconds() / 3600)
         else:
-            return tt.t_tide(self.data2()[site]['tide'], dt=self.deltatime.total_seconds() / 3600)
+            return tt.t_tide(self.data[site]['tide'], dt=self.deltatime.total_seconds() / 3600)
 
     def plot_tide_compare(self, site='DongShuiGang', long=3, date1=None):
         temp_data = self.sitedata(site)
@@ -555,7 +557,7 @@ class Process_Tide(Tide):
                     else:
                         sheet.write(row1 + 5 + hanghanghang_1, 28 + move1, high.loc[i, ['tide']] * alpha, format_num)
 
-                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(int(high.tide.max())),
+                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(int(alpha* high.tide.max())),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 2,
@@ -596,7 +598,7 @@ class Process_Tide(Tide):
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num_r)
                     else:
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num)
-                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(int(low.tide.min())),
+                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(int(alpha * low.tide.min())),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 9,
@@ -734,16 +736,28 @@ class Process_Tide(Tide):
         df2 = df.drop(['time','format_time','if_min','if_max'],1)
         df2.index.names = [None]
         dfs = df2.style.bar(subset=['tide', 'tide_init','diff'], color=['#d65f5f', '#5fba7d'], align='mid')
+
         h = dfs.render()
         h = h.replace('None',' ').replace('NaT','').replace('0 days','').replace('format_time','时间').replace('tide_init','初始潮位').replace('tide','潮位（去噪）').replace('diff','潮差').replace('raising_time','涨潮时间').replace('ebb_time','落潮时间').replace('nan','').replace('<table id=','<table border="1" id=')
         self.html.update({site:h})
 
 if __name__ == "__main__":
-    t = Process_Tide(r"C:\Users\Feiger\Desktop\2.xlsx")
-    t.preprocess()
-    r"""t.display()
-    with open(r"C:\Users\Feiger\Desktop\2.html", 'w') as f:
-        f.write(t.html['P'])"""
-    t.output(r"C:\Users\Feiger\Desktop\22.xlsx")
-    print('*****OK*****')
+    for i in [11]:
+        filename1 = r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比调和分析（鼠浪湖）\原始数据.xlsx"
+        filename2 = filename1.replace(filename1.split('.')[-1],'中间数据.xlsx')
+        filename3 = filename1.replace(filename1.split('.')[-1],'结果.xlsx')
+        t = Process_Tide(filename1)
+        t.preprocess()
+        """t.display()
+        with open(r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\中间数据2012-3.html", 'w') as f:
+            for _,v in t.html.items():
+                f.write(v)
+        excel_writer = pandas.ExcelWriter(filename2)
+        for key,v in t.data.items():
+            if '原始数据' not in key:
+                v.to_excel(excel_writer,sheet_name=key)
+                excel_writer.save()
+        t.output(filename3)"""
+        print('*****OK*****')
+
 

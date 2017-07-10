@@ -407,6 +407,6 @@ class Put_tide_in(Qt35.Tide):
         return  self.file
     def high(self):
         return  self.high
-tide = Put_tide_in('test_dongshuigang2.xlsx','输出2.xlsx')
+tide = Put_tide_in("E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\YSW 2012-03计算.xls","E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\潮位报表2012-3（程序结果）.xls")
 
 
