@@ -48,88 +48,81 @@ class Tide(object):
         if only_first_sheet:
             self.sites = self.sites[:1]
 
-    def preprocess(self):
-        for s in self.sites:
-            try:
-                self.tide_sheet = pandas.read_excel(self.filename, sheetname=s)
-                if 'tide' in self.tide_sheet.columns.values:
-                    if 'time' in self.tide_sheet.columns.values:
-                        pass
-                    else:
-                        say_out('Please Check Your Format of the Sheet')
-            except:
-                say_out('Please Check Your sheets name of the File')
-                raise EOFError
+    def preprocess(self,s):
+        try:
+            self.tide_sheet = pandas.read_excel(self.filename, sheetname=s)
+            if self.tide_sheet.empty:
+                raise ValueError
 
-            temp_data = self.tide_sheet
-
-            t = []
-            if isinstance(temp_data.time[1], pandas.tslib.Timestamp) or isinstance(temp_data.time[1],
-                                                                                   datetime.datetime):
-                t = temp_data.time
+            if 'tide' in self.tide_sheet.columns.values and 'time' in self.tide_sheet.columns.values:
+                pass
             else:
-                for x in temp_data.time:
-                    t.append(dateutil.parser.parse(x))
+                say_out('Please Check Your Format of the Sheet')
+                raise AttributeError
+        except:
+            say_out('Please Check Your sheets name of the File')
+            raise EOFError
+        temp_data = self.tide_sheet
+        t = []
+        if isinstance(temp_data.time[1], pandas.tslib.Timestamp) or isinstance(temp_data.time[1],
+                                                                               datetime.datetime):
+            t = temp_data.time
+        else:
+            for x in temp_data.time:
+                t.append(dateutil.parser.parse(x))
+        temp_data['format_time'] = t
+        temp_data['tide_init'] = temp_data.tide / 100
+        temp_data = temp_data.dropna()
+        self.deltatime = t[1] - t[0]
+        if t[0] + (t[1] - t[0]) * (len(t) - 1) != t[len(t) - 1]:
+            i_temp = 0
+            while i_temp<len(t)-2:
+                if t[i_temp+1]-t[i_temp] != self.deltatime:
+                    say_out(s+'站时间序列中，'+t[i_temp].strftime('%Y-%m-%d %H:%M')
+    +'与'+ t[i_temp+1].strftime('%Y-%m-%d %H:%M')
+    +'时间间隔出错,请检查')
+                i_temp+=1
 
-            temp_data['format_time'] = t
-            temp_data['tide_init'] = temp_data.tide / 100
-            temp_data = temp_data.dropna()
-
-            if t[0] + (t[1] - t[0]) * (len(t) - 1) != t[len(t) - 1]:
-                say_out(str(s) + '时间间隔有问题，请检查时间序列')
-
-            self.deltatime = t[1] - t[0]
-            num_time = np.linspace(0, len(t) * self.deltatime.total_seconds() / 3600, len(t))
-
-            temp_data['tide_init'] = temp_data.tide  # 后续调和导出、根据调和分析对数据进行去噪-需要处理###
-            if len(temp_data) % 2 == 1:
-                temp_data = temp_data.loc[0:(len(temp_data) - 2)]
-            temp_data.tide = process(temp_data.tide)
-
-            temp_data.index = temp_data['format_time']
-
-            temp_data = temp_data.loc[temp_data.format_time <= self.time2]
-            temp_data = temp_data.loc[temp_data.format_time >= self.time1]
-
-            temp_data = self.process_one(temp_data)
-
-            year_tide = []
-            month_tide = []
-            day_tide = []
-            for i, j in temp_data.groupby(temp_data.index.year):  #
-                year_tide.append(j)
-                for ii, jj in j.groupby(j.index.month):
-                    month_tide.append(jj)
-                    for iii, jjj in jj.groupby(jj.index.day):
-                        day_tide.append(jjj)
-
-            x = pandas.concat([temp_data])
-            self.data[s + '原始数据'] = temp_data[:]
-            self.data[s + '原始数据']['tide'] = self.data[s + '原始数据']['tide_init'][:]
-            temp_data2 = self.data[s + '原始数据']
-            # self.data.pop(s)
-            self.data[s] = x
-
-            year_tide2 = []
-            month_tide2 = []
-            day_tide2 = []
-            for i, j in temp_data2.groupby(temp_data.index.year):  #
-                year_tide2.append(j)
-                for ii, jj in j.groupby(j.index.month):
-                    month_tide2.append(jj)
-                    for iii, jjj in jj.groupby(jj.index.day):
-                        day_tide2.append(jjj)
-
-            self.year[s] = year_tide
-            self.year[s + '原始数据'] = year_tide2
-
-            self.month[s] = month_tide
-            self.month[s + '原始数据'] = month_tide2
-
-            self.day[s] = day_tide
-            self.day[s + '原始数据'] = day_tide2
-
-            print(s + "站预处理结束")
+        num_time = np.linspace(0, len(t) * self.deltatime.total_seconds() / 3600, len(t))
+        temp_data['tide_init'] = temp_data.tide  # 后续调和导出、根据调和分析对数据进行去噪-需要处理###
+        if len(temp_data) % 2 == 1:
+            temp_data = temp_data.loc[0:(len(temp_data) - 2)]
+        temp_data.tide = process(temp_data.tide)
+        temp_data.index = temp_data['format_time']
+        temp_data = temp_data.loc[temp_data.format_time <= self.time2]
+        temp_data = temp_data.loc[temp_data.format_time >= self.time1]
+        temp_data = self.process_one(temp_data)
+        year_tide = []
+        month_tide = []
+        day_tide = []
+        for i, j in temp_data.groupby(temp_data.index.year):  #
+            year_tide.append(j)
+            for ii, jj in j.groupby(j.index.month):
+                month_tide.append(jj)
+                for iii, jjj in jj.groupby(jj.index.day):
+                    day_tide.append(jjj)
+        x = pandas.concat([temp_data])
+        self.data[s + '原始数据'] = temp_data[:]
+        self.data[s + '原始数据']['tide'] = self.data[s + '原始数据']['tide_init'][:]
+        temp_data2 = self.data[s + '原始数据']
+        # self.data.pop(s)
+        self.data[s] = x
+        year_tide2 = []
+        month_tide2 = []
+        day_tide2 = []
+        for i, j in temp_data2.groupby(temp_data.index.year):  #
+            year_tide2.append(j)
+            for ii, jj in j.groupby(j.index.month):
+                month_tide2.append(jj)
+                for iii, jjj in jj.groupby(jj.index.day):
+                    day_tide2.append(jjj)
+        self.year[s] = year_tide
+        self.year[s + '原始数据'] = year_tide2
+        self.month[s] = month_tide
+        self.month[s + '原始数据'] = month_tide2
+        self.day[s] = day_tide
+        self.day[s + '原始数据'] = day_tide2
+        print(s + "站预处理结束")
 
     def process_one(self, temp_data):
 
@@ -292,10 +285,6 @@ class Tide(object):
         excel_writer.save()
 
 class Process_Tide(Tide):
-    #    def __init__(self,filename):
-    ###########################################################
-    #       self.data = super().__init__(filename)
-    #########################################################################################################################
     def output(self, outfile):
         chaoshi = "潮时"
         chaogao = "潮高"
@@ -743,11 +732,12 @@ class Process_Tide(Tide):
 
 if __name__ == "__main__":
     for i in [11]:
-        filename1 = r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比调和分析（鼠浪湖）\原始数据.xlsx"
+        filename1 = r"E:\★★★★★CODE★★★★★\Git\codes\ocean_hydrology_data_process\测试潮位 - 副本.xls"
         filename2 = filename1.replace(filename1.split('.')[-1],'中间数据.xlsx')
         filename3 = filename1.replace(filename1.split('.')[-1],'结果.xlsx')
         t = Process_Tide(filename1)
-        t.preprocess()
+        for i in t.sites:
+            t.preprocess(i)
         """t.display()
         with open(r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\中间数据2012-3.html", 'w') as f:
             for _,v in t.html.items():
