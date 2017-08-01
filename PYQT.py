@@ -1,7 +1,7 @@
 from PyQt5.QtCore import QDir, Qt
 from PyQt5.QtCore import QModelIndex, Qt,QDate,QUrl,pyqtSignal,QObject
 from PyQt5.QtGui import QStandardItemModel,QValidator,QDoubleValidator
-from PyQt5.QtWidgets import QApplication, QMainWindow,QAction,QLabel,QVBoxLayout, QFormLayout,QLineEdit,QSpinBox, QTableView,QFileDialog,QTextBrowser,QLayout,QGroupBox,QHBoxLayout,QTabWidget,QPushButton,QWidget,QCheckBox,QMessageBox,QDialog,QDateTimeEdit,QComboBox,QDialogButtonBox,QErrorMessage,QDoubleSpinBox,QInputDialog
+from PyQt5.QtWidgets import QApplication, QMainWindow,QAction,QLabel,QVBoxLayout, QFormLayout,QLineEdit,QSpinBox, QTableView,QFileDialog,QTextBrowser,QLayout,QGroupBox,QHBoxLayout,QTabWidget,QPushButton,QWidget,QCheckBox,QMessageBox,QDialog,QDateTimeEdit,QComboBox,QDialogButtonBox,QErrorMessage,QDoubleSpinBox,QInputDialog,QTextEdit
 from PyQt5.QtWebKitWidgets  import QWebView
 from threading import Thread
 import sys,time
@@ -11,6 +11,7 @@ from tide import Process_Tide
 class M_window(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.show_content={}
         self.initUI()
         global sig
         sig = All_Signal_event()
@@ -23,7 +24,7 @@ class M_window(QMainWindow):
         self.createMenu()
         centralWidget = QWidget()
 
-        self.shower = QWebView()
+        self.shower = QTabWidget()
         self.allGroup = QGroupBox()
         self.mid_l_Group = QGroupBox()
         self.mid_s_Group = QGroupBox("测验概况")
@@ -31,8 +32,8 @@ class M_window(QMainWindow):
         self.Generate_all_button = QPushButton("生成报告及文档")
 
         centralLayout =  QVBoxLayout()
-        centralLayout.addWidget(self.shower,stretch=50)
-        centralLayout.addWidget(self.allGroup,stretch = 1)
+        centralLayout.addWidget(self.shower)
+        centralLayout.addWidget(self.allGroup)
         centralWidget.setLayout(centralLayout)
         self.setCentralWidget(centralWidget)
 
@@ -41,8 +42,8 @@ class M_window(QMainWindow):
         allGroupLayout.addWidget(self.Tabs)
         self.allGroup.setLayout(allGroupLayout)
 
-        self.tides_contral = TideTab()
-        self.Tabs.addTab(self.tides_contral,"潮位")
+        self.tides_control = TideTab()
+        self.Tabs.addTab(self.tides_control,"潮位")
 
         mid_l_GroupLayout = QVBoxLayout()
         mid_l_GroupLayout.addWidget(self.mid_s_Group)
@@ -135,20 +136,37 @@ class M_window(QMainWindow):
     #def createTideTab(self):
     #    self.tideTab = QTabWidget
 
-    def display(self,Html):
-        self.shower.setHtml(Html)
+    def display(self,category,title,content):
+        if category =='HTML':
+            self.show_content.update({title+'(web)':QWebView()})
+            self.shower.addTab(self.show_content[title+'(web)'],title+'(web)')
+            self.show_content[title+'(web)'].setHtml(content)
+            self.shower.setCurrentWidget(self.show_content[title+'(web)'])
+        if category =='TXT':
+            self.show_content.update({title:QTextEdit()})
+            self.shower.addTab(self.show_content[title],title)
+            #self.show_content[title].setHtml(content)#试试效果
+            self.show_content[title].setReadOnly(True)
+            self.show_content[title].setPlainText(content)
+            self.shower.setCurrentWidget(self.show_content[title])
 
-    def display_tide(self,filename,site):
-        self.display(t[filename].html[site])
+    def display_tide_HTML(self,filename,site):
+        self.display(category='HTML',title=site,content=t[filename].html[site])
+
+    def display_tide_TXT(self,filename,site):
+        #显示内容还需要改
+        columns = [ 'tide', 'tide_init', 'if_min', 'if_max', 'diff', 'raising_time', 'ebb_time']
+        self.display(category='TXT', title=site, content=t[filename].data[site].to_string(columns=columns, index_names=False).replace('None',' '*4).replace('False',' '*5))
 
     def tide_site_element_event(self,file,site):
-        self.tides_contral.sites_contral[site].signal.tide_preprocess.connect(t[file].preprocess)
-        self.tides_contral.sites_contral[site].signal.show_tide_signal.connect(self.display_tide)
+        self.tides_control.sites_control[site].signal.tide_preprocess.connect(t[file].preprocess)
+        self.tides_control.sites_control[site].signal.show_tide_HTML_signal.connect(self.display_tide_HTML)
+        self.tides_control.sites_control[site].signal.show_tide_TXT_signal.connect(self.display_tide_TXT)
+
 
 class TideTab(QWidget):
     def __init__(self,parent = None):
         super(TideTab,self).__init__(parent)
-        self.signal = Tide_signal_event
         global t
         t = {}
         self.layout_element()
@@ -194,10 +212,10 @@ class TideTab(QWidget):
 
         mainLayout = QHBoxLayout()
         mainLayout.addWidget(self.tide_l_Group)
-        mainLayout.addWidget(self.sites_Tab,stretch=5)
+        mainLayout.addWidget(self.sites_Tab)
         self.setLayout(mainLayout)
 
-        self.sites_contral= {}
+        self.sites_control= {}
 
     def welcome_init_tab(self):
         self.init_tab = Welcome_Tab("请载入潮位数据文件")
@@ -220,13 +238,13 @@ class TideTab(QWidget):
         for f in fileName:
             try:
                 t.update({f:Process_Tide(f,only_first_sheet = self.if_one_sheet.isChecked())})
-                #t.append(Process_Tide(f,only_first_sheet = self.if_one_sheet.isChecked()))
+
             except:
                 self.errorMessage(EOFError)
             if self.auto_Preprocess.isChecked():
                 for i in t.values():
-                    for ii in i.sites:
-                        tide_thread = Thread(target=i.preprocess,kwargs={'s':ii})
+                    for sitename in i.sites:
+                        tide_thread = Thread(target=i.preprocess,kwargs={'s':sitename})
                         second = 0
                         tide_thread.start()
                         while tide_thread.is_alive():
@@ -238,16 +256,13 @@ class TideTab(QWidget):
             #i为文件名
             #j为process calss
             for site in process_tide.sites:
-                self.sites_contral.update({site: Tide_Site_Tab(site,filename)})
-                self.sites_Tab.addTab(self.sites_contral[site],site)
+                self.sites_control.update({site: Tide_Site_Tab(site,filename)})
+                self.sites_Tab.addTab(self.sites_control[site],site)
                 self.sites_Tab.setTabToolTip(self.sites_Tab.count()-1,filename)
-                #self.site_element_event(filename,site)
-                self.generate_tide_HTML(filename,site)
+
                 sig.load_tide_file_done.emit(filename, site)#信号绑定
-
-                self.sites_contral[site].Save_Sheet_Button.clicked.connect(self.save_one_site_tide_clicked)
-
-
+                self.sites_control[site].signal_connect()
+                self.sites_control[site].Save_Sheet_Button.clicked.connect(self.sites_control[site].save_one_site_tide_clicked)
 
         if t and  self.sites_Tab.tabText(0) == '未载入潮位数据':
             self.sites_Tab.removeTab(0)
@@ -268,36 +283,14 @@ class TideTab(QWidget):
         while self.sites_Tab.count() !=0 :
             self.sites_Tab.removeTab(0)
 
-    def show_tide(self,file,site):
-        t[file].display(site)
-        print(file+'文件中的'+site+'HTML显示处理完毕')
-
-    def generate_tide_HTML(self,filename,site):
-        html_process_thread = Thread(target=self.show_tide, kwargs={'file':filename, 'site': site})
-        html_process_thread.start()
-        second = 0
-        while html_process_thread.is_alive():
-            print('正在生成潮位对应HTML文件，处理用时' + str(second) + '秒')
-            time.sleep(0.5)
-            second += 0.5
-
-
-
-    def save_one_site_tide(self,filename,site):
-        options = QFileDialog.Options()
-        savefileName, _ = QFileDialog.getOpenFileName(self, "选取文件", "E:",
-                                                   "97-03表格文档 (*.xls);;Excel文件(*.xlsx)", options=options)
-        t[filename].output(savefileName,sitename=site)
-
     def errorMessage(self,Wrong_msg):
         self.errorMessageDialog.showMessage(Wrong_msg)
         self.errorLabel.setText("确定")
 
 class Site_Tide_signal_event(QObject):
     tide_preprocess = pyqtSignal(str,float)
-    show_tide_signal = pyqtSignal(str,str)
-
-class Tide_signal_event(QObject):
+    show_tide_HTML_signal = pyqtSignal(str,str)
+    show_tide_TXT_signal = pyqtSignal(str,str)
     save_one_site_signal = pyqtSignal(str,str)
 
 class All_Signal_event(QObject):
@@ -314,16 +307,16 @@ class Tide_Site_Tab(QWidget):
     def layout_element(self):
         self.lu_Group = QGroupBox("测点位置")
         self.ld_Group = QGroupBox("起止时间")
-        self.mid_Group_out = QGroupBox("潮位数据处理")
+        self.mid_Group_out = QGroupBox("潮位查看")
         self.mid_Group_in = QGroupBox("调整去噪度")
         self.r_Group = QGroupBox("结果输出")
         self.r_in_Group_u = QGroupBox("调和分析")
         self.r_in_Group_d = QGroupBox("文档输出")
-        self.add_Group1 = QGroupBox("施测信息")
+        #self.add_Group1 = QGroupBox("施测信息")
         self.add_Group2 = QGroupBox("高程基准")
         self.add_Group = QGroupBox()
 
-        add_Group1 = QFormLayout()
+        """add_Group1 = QFormLayout()
         self.Survey_man = QLineEdit()
         self.Survey_Implement = QComboBox()
         self.Survey_Implement.addItem("Tide Master")
@@ -333,21 +326,22 @@ class Tide_Site_Tab(QWidget):
         add_Group1.addRow(QLabel("测量人员"),self.Survey_man)
         add_Group1.addRow(QLabel("采用仪器"), self.Survey_Implement)
         add_Group1.addRow(QLabel("仪器编号"),self.Survey_Implement_Series_num)
-        self.add_Group1.setLayout(add_Group1)
+        self.add_Group1.setLayout(add_Group1)"""
 
         add_Group2 = QFormLayout()
-        self.Altitudinal_System1 = Altitudinal_Select()
-        self.Altitudinal_System_OUT = Altitudinal_Select()
+        self.Altitudinal_System = Altitudinal_Select()
         self.Altitudinal_Add = QDoubleSpinBox()
         self.Altitudinal_Add.setRange(-100,100)
-        self.Altitudinal_Add.setToolTip("单位为米")
-        add_Group2.addRow(QLabel("实测数据基准面"),self.Altitudinal_System1.combobox )
-        add_Group2.addRow(QLabel("输出数据基准面"), self.Altitudinal_System_OUT.combobox)
-        add_Group2.addRow(QLabel("基准面高差"), self.Altitudinal_Add)
+        self.Altitudinal_Add.setToolTip("单位与原数据一致，计算方式为加")
+        self.confirm_change_altitudinal = QPushButton('改变数据高程',clicked=self.change_altitude)
+        self.confirm_change_altitudinal.setToolTip("单位与原数据一致，计算方式为加")
+        add_Group2.addRow(QLabel("数据基准面"),self.Altitudinal_System.combobox )
+        add_Group2.addRow(QLabel("改变基准面"), self.Altitudinal_Add)
+        add_Group2.addRow(self.confirm_change_altitudinal)
         self.add_Group2.setLayout(add_Group2)
 
         add_Group = QHBoxLayout()
-        add_Group.addWidget(self.add_Group1)
+        #add_Group.addWidget(self.add_Group1)
         add_Group.addWidget(self.add_Group2)
         self.add_Group.setLayout(add_Group)
 
@@ -373,8 +367,10 @@ class Tide_Site_Tab(QWidget):
         ld_GroupLayout.addRow(self.end_time)
         self.ld_Group.setLayout(ld_GroupLayout)
 
-        mid_Group_out = QHBoxLayout()
-        self.Show_tide_data_button = QPushButton("&潮位\n查看",clicked=self.show_tide_click)
+        mid_Group_out = QVBoxLayout()
+        self.Show_tide_data_button1 = QPushButton("&潮位查看\n（WEB模式）",clicked=self.show_tide_HTML_click)
+
+        self.Show_tide_data_button2 = QPushButton("&潮位查看\n（普通模式）",clicked = self.show_tide_TXT_click)
         self.Process_method_select = QComboBox()
         self.Process_method_select.addItem("小波分析")
         self.Process_method_select.addItem("数值平滑")
@@ -382,9 +378,10 @@ class Tide_Site_Tab(QWidget):
         self.Process_threshold = QSpinBox()
         self.Process_threshold.setRange(0,20)
         self.Process_threshold.setValue(5)
-        mid_Group_out.addWidget(self.Show_tide_data_button,stretch=2)
+        mid_Group_out.addWidget(self.Show_tide_data_button1)
+        mid_Group_out.addWidget(self.Show_tide_data_button2)
         mid_Group_out.addSpacing(20)
-        mid_Group_out.addWidget(self.mid_Group_in,stretch=4)
+        #mid_Group_out.addWidget(self.mid_Group_in,stretch=4)
         mid_Group_in = QFormLayout()
         mid_Group_in.addRow(self.Process_method_select)
         mid_Group_in.addRow("阀值",self.Process_threshold)
@@ -394,7 +391,7 @@ class Tide_Site_Tab(QWidget):
 
         r_Group = QFormLayout()
         self.Save_Sheet_Button = QPushButton("保存潮位报表")
-        self.Save_Mid_Data_Button = QPushButton("保存中间结果")
+        self.Save_Mid_Data_Button = QPushButton("保存中间结果",clicked=self.save_one_site_mid_data)
         self.Astronomical_Tide_Analysis = QPushButton("天文潮计算")
         self.Theoretical_Mininum_tidal_leval = QPushButton("计算对应理论最低潮面")
         self.Is_Output_Report = QCheckBox("输出文字报告")
@@ -414,19 +411,70 @@ class Tide_Site_Tab(QWidget):
         mainLayout = QHBoxLayout()
         mainLayout.addWidget(self.lu_Group)
         mainLayout.addWidget(self.ld_Group)
-        mainLayout.addWidget(self.add_Group,stretch=3)
-        mainLayout.addWidget(self.mid_Group_out,stretch=2)
-        mainLayout.addWidget(self.r_Group,stretch=5)
+        mainLayout.addWidget(self.add_Group)
+        mainLayout.addWidget(self.mid_Group_out)
+        mainLayout.addWidget(self.mid_Group_in)
+        mainLayout.addWidget(self.r_Group)
         self.setLayout(mainLayout)
-
-
-
 
     def preprocess_click(self):
         self.signal.tide_preprocess.emit(self.sitename,self.Process_threshold.value())
 
-    def show_tide_click(self):
-        self.signal.show_tide_signal.emit(self.filename,self.sitename)
+    def show_tide_HTML_click(self):
+        if not self.sitename in t[self.filename].html.keys():
+            self.generate_tide_HTML()
+        self.signal.show_tide_HTML_signal.emit(self.filename,self.sitename)
+
+    def show_tide_TXT_click(self):
+        self.signal.show_tide_TXT_signal.emit(self.filename,self.sitename)
+
+    def signal_connect(self):
+        self.signal.save_one_site_signal.connect(self.save_one_site_tide)
+
+    def generate_tide_HTML(self):
+        html_process_thread = Thread(target=t[self.filename].display,kwargs={'site':self.sitename})
+        html_process_thread.start()
+        second = 0
+        while html_process_thread.is_alive():
+            print('正在生成潮位对应HTML文件，处理用时' + str(second) + '秒')
+            time.sleep(0.5)
+            second += 0.5
+        print(self.filename+'文件中的'+self.sitename+'HTML显示处理完毕')
+
+    def save_one_site_tide_clicked(self):
+        self.signal.save_one_site_signal.emit(self.filename,self.sitename)
+
+    def save_something_to_excel(self,fun,args,file_type_in_chinese):
+
+        options = QFileDialog.Options()
+        savefileName, _ = QFileDialog.getSaveFileName(self, "保存"+file_type_in_chinese, "E:",
+                                                      "Excel文件 (*.xlsx)", options=options)
+        args.update({'outfile': savefileName})
+        save_tide_thread = Thread(target=fun,
+                                  kwargs=args)
+        second = 0
+        save_tide_thread.start()
+        print('#' * 20)
+        while save_tide_thread.is_alive():
+            print('正在生成' + self.sitename + file_type_in_chinese +'，已用时' + str(second) + '秒，请稍等')
+            time.sleep(0.5)
+            second += 0.5
+        print('#' * 20)
+
+    def save_one_site_mid_data(self):
+        self.save_something_to_excel(t[self.filename].out_put_mid_data, {'sitename': self.sitename},'计算过程文件')
+
+    def save_one_site_tide(self):
+        self.save_something_to_excel(t[self.filename].output,{ 'sitename': self.sitename,
+                                          'time_start': self.start_time.dateTime().toPyDateTime()
+                                      , 'time_end': self.end_time.dateTime().toPyDateTime()
+                                      , 'reference_system': self.Altitudinal_System.combobox.currentText()},'潮位报表')
+
+    def change_altitude(self):
+        t[self.filename].change_altitude(self.sitename,diff=self.Altitudinal_Add.value())
+
+        print('处理结束')
+
 
 class Altitudinal_Select(QDialog):
     def __init__(self,parent = None):
