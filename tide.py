@@ -25,30 +25,28 @@ def say_out(xxx):
     # 错误提示
     print(xxx)
 
-
-def process(y):
+def process(y,threshold):
     # 信号去噪
     rft = np.fft.rfft(y)
-    rft[int(len(rft) / 5):] = 0
+    rft[int(len(rft) / threshold):] = 0
     print('信号去噪结束')
     return np.fft.irfft(rft)
 
 class Tide(object):
-    def __init__(self, filename, only_first_sheet = False,time1=datetime.datetime(2000, 1, 1, 00, 0),
-                 time2=datetime.datetime(2018, 10, 16, 5, 0)):
+    def __init__(self, filename, only_first_sheet = False):
         self.filename = filename
-        self.time1 = time1
-        self.time2 = time2
         self.data = {}
         self.year = {}
         self.month = {}
         self.day = {}
         self.html = {}
         self.sites = xlrd.open_workbook(filename=filename).sheet_names()
+        for i in self.sites:
+            self.data[i] = pandas.read_excel(self.filename, sheetname=i)
         if only_first_sheet:
             self.sites = self.sites[:1]
 
-    def preprocess(self,s):
+    def preprocess(self,s,threshold=5):
         try:
             self.tide_sheet = pandas.read_excel(self.filename, sheetname=s)
             if self.tide_sheet.empty:
@@ -87,10 +85,8 @@ class Tide(object):
         temp_data['tide_init'] = temp_data.tide  # 后续调和导出、根据调和分析对数据进行去噪-需要处理###
         if len(temp_data) % 2 == 1:
             temp_data = temp_data.loc[0:(len(temp_data) - 2)]
-        temp_data.tide = process(temp_data.tide)
+        temp_data.tide = process(temp_data.tide,threshold)
         temp_data.index = temp_data['format_time']
-        temp_data = temp_data.loc[temp_data.format_time <= self.time2]
-        temp_data = temp_data.loc[temp_data.format_time >= self.time1]
         temp_data = self.process_one(temp_data)
         year_tide = []
         month_tide = []
@@ -105,7 +101,6 @@ class Tide(object):
         self.data[s + '原始数据'] = temp_data[:]
         self.data[s + '原始数据']['tide'] = self.data[s + '原始数据']['tide_init'][:]
         temp_data2 = self.data[s + '原始数据']
-        # self.data.pop(s)
         self.data[s] = x
         year_tide2 = []
         month_tide2 = []
@@ -268,9 +263,16 @@ class Tide(object):
     def sites(self):
         return self.sites
 
-    def out_put_mid_data(self, filename):
-        excel_writer = pandas.ExcelWriter(filename)
+    def out_put_mid_data(self, outfile,sitename=None):
+        excel_writer = pandas.ExcelWriter(outfile)
+        switch = True
         for s in self.sites:
+            if sitename:
+                if switch:
+                    s = sitename
+                    switch = False
+                else:
+                    continue
             ss =self.data[s]
             ss = ss.drop(['format_time','time'],axis=1)
             for i in ss.index:
@@ -285,7 +287,8 @@ class Tide(object):
         excel_writer.save()
 
 class Process_Tide(Tide):
-    def output(self, outfile):
+    def output(self, outfile,sitename=None,time_start=None,time_end = None,reference_system = None):
+
         chaoshi = "潮时"
         chaogao = "潮高"
         self.file = outfile
@@ -434,6 +437,11 @@ class Process_Tide(Tide):
                 return 0
 
         for site in x.data.keys():
+            if sitename :
+                if sitename in site:
+                    pass
+                else:
+                    continue
             if x.data[site].tide.max() - x.data[site].tide.min() > 50:
                 alpha = 1
             else:
@@ -453,6 +461,12 @@ class Process_Tide(Tide):
                     pass
 
             for mon in x.month[site]:
+
+                if time_start and time_end:
+                    time_start = pandas.Timestamp(time_start)
+                    time_end = pandas.Timestamp(time_end)
+                    mon = mon.loc[mon.format_time <= time_end]
+                    mon = mon.loc[mon.format_time >= time_start]
 
                 row1 = count * 42
                 count = count + 1  # 第几个月
@@ -655,7 +669,7 @@ class Process_Tide(Tide):
                 sheet.write(row1 + 1, 0, '工程名称：', format_title2)
                 sheet.write(row1 + 1, 0, '工程名称：', format_title2)
                 sheet.write(row1 + 2, 0, '海区：', format_title2)
-                sheet.write(row1 + 1, 16, '高程系统：原始数据高程', format_title2)
+                sheet.write(row1 + 1, 16, '高程系统：'+ reference_system, format_title2)
                 sheet.write(row1 + 2, 16,
                             '观测日期：' + mon.format_time.min().strftime('%Y/%m/%d') + '至' + mon.format_time.max().strftime(
                                 '%Y/%m/%d'), format_title2)
@@ -711,16 +725,22 @@ class Process_Tide(Tide):
         else:
             return han_zi
 
-    def outfile(self):
-        return self.file
+    def change_altitude(self,sitename,diff):
 
-    def high(self):
-        return self.high
+        for i in [self.month[sitename],self.day[sitename]]:
+            for j in i :
+                j.tide = j.tide + diff
+                j.tide_init = j.tide_init + diff
+        self.data[sitename].tide = self.data[sitename].tide +diff
+        self.data[sitename].tide_init = self.data[sitename].tide_init + diff
 
-    def display(self,site=None):
+        if not "原始数据" in sitename:
+            self.change_altitude(sitename+'原始数据',diff)
 
-        if len(self.sites)==1:
-            site = self.sites[0]
+
+
+    def display(self,site):
+
         df = self.data[site]
         df2 = df.drop(['time','format_time','if_min','if_max'],1)
         df2.index.names = [None]
