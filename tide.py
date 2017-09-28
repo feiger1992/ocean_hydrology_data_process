@@ -7,6 +7,7 @@ import dateutil
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
+
 import ttide as tt
 
 import xlsxwriter
@@ -23,12 +24,15 @@ plt.rcParams['axes.unicode_minus'] = False
 
 def say_out(xxx):
     # 错误提示
+    print("*" * 20)
     print(xxx)
+    print("*" * 20)
 
 def process(y,threshold):
     # 信号去噪
     rft = np.fft.rfft(y)
-    rft[int(len(rft) / threshold):] = 0
+    #rft[int(len(rft) / threshold):] = 0
+    rft[round(len(rft) * ( 1- threshold / 100)):] = 0
     print('信号去噪结束')
     return np.fft.irfft(rft)
 
@@ -40,13 +44,14 @@ class Tide(object):
         self.month = {}
         self.day = {}
         self.html = {}
+        self.harmonic_result={}
         self.sites = xlrd.open_workbook(filename=filename).sheet_names()
         for i in self.sites:
             self.data[i] = pandas.read_excel(self.filename, sheetname=i)
         if only_first_sheet:
             self.sites = self.sites[:1]
 
-    def preprocess(self,s,threshold=5):
+    def preprocess(self,s,threshold=10):
         try:
             self.tide_sheet = pandas.read_excel(self.filename, sheetname=s)
             if self.tide_sheet.empty:
@@ -145,14 +150,7 @@ class Tide(object):
             except:
                 pass
 
-        for x in temp_data.loc[temp_data.if_min == True].format_time:
-            try:
-                temp_data.loc[x, 'ebb_time'] = x - temp_data[
-                    (temp_data.if_max == True) & (temp_data.format_time < x)].format_time.max()
-                temp_data.loc[x, 'diff'] = temp_data.loc[temp_data[(temp_data.if_max == True) & (
-                    temp_data.format_time < x)].format_time.max(), 'tide'] - temp_data.loc[x, 'tide']
-            except:
-                pass
+
                 ###############筛选极值
         #####根据潮差与涨落潮历时筛选
         if temp_data['diff'].max() < 50:
@@ -216,13 +214,22 @@ class Tide(object):
             switch = temp_data.loc[temp_data.if_min == True].append(
                 temp_data.loc[temp_data.if_max == True]).sort_index().index
             count_filtertime += 1
+        for x in temp_data.loc[temp_data.if_min == True].format_time:
+            try:
+                temp_data.loc[x, 'ebb_time'] = x - temp_data[
+                    (temp_data.if_max == True) & (temp_data.format_time < x)].format_time.max()
+                temp_data.loc[x, 'diff'] = temp_data.loc[temp_data[(temp_data.if_max == True) & (
+                    temp_data.format_time < x)].format_time.max(), 'tide'] - temp_data.loc[x, 'tide']
+            except:
+                pass
         return temp_data
 
     def harmonic_analysis(self, site, if_init=True):
         if if_init:
-            return tt.t_tide(self.data[site]['tide_init'], dt=self.deltatime.total_seconds() / 3600)
+            self.harmonic_result.update({site:tt.t_tide(self.data[site]['tide_init'], dt=self.deltatime.total_seconds() / 3600)})
         else:
-            return tt.t_tide(self.data[site]['tide'], dt=self.deltatime.total_seconds() / 3600)
+            self.harmonic_result.update(
+                {site: tt.t_tide(self.data[site]['tide'], dt=self.deltatime.total_seconds() / 3600)})
 
     def plot_tide_compare(self, site='DongShuiGang', long=3, date1=None):
         temp_data = self.sitedata(site)
@@ -560,7 +567,7 @@ class Process_Tide(Tide):
                     else:
                         sheet.write(row1 + 5 + hanghanghang_1, 28 + move1, high.loc[i, ['tide']] * alpha, format_num)
 
-                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(int(alpha* high.tide.max())),
+                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(round(alpha* high.tide.max())),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 2,
@@ -579,13 +586,13 @@ class Process_Tide(Tide):
                 #    hangshu += 1
                 #   print('+++++')
 
-                sheet.write(row1 + 8 + hangshu, 2, '平均涨潮历时:' + str(int(divmod(t1, 3600)[0])) + '小时' + str(
-                    int(divmod(t1, 3600)[1] / 60)) + '分钟',
+                sheet.write(row1 + 8 + hangshu, 2, '平均涨潮历时:' + str(round(divmod(t1, 3600)[0])) + '小时' + str(
+                    round(divmod(t1, 3600)[1] / 60)) + '分钟',
                             format_cn_a_left1)
 
                 sheet.merge_range(row1 + 8 + hangshu, 21, row1 + 8 + hangshu, 25, '月平均高潮潮高=',
                                   format_cn_a_right1)
-                sheet.write(row1 + 8 + hangshu, 26, int(alpha * high.tide.mean()), format_cn_a_left1)
+                sheet.write(row1 + 8 + hangshu, 26, round(alpha * high.tide.mean()), format_cn_a_left1)
                 t2 = 0
                 t_count = []
                 print('=低潮汇总================================')
@@ -601,7 +608,7 @@ class Process_Tide(Tide):
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num_r)
                     else:
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num)
-                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(int(alpha * low.tide.min())),
+                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(round(alpha * low.tide.min())),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 9,
@@ -618,20 +625,20 @@ class Process_Tide(Tide):
                 t2 = t2 / len(low.dropna().index)
 
                 print(t2)
-                sheet.write(row1 + 8 + hangshu, 9, '平均落潮历时:' + str(int(divmod(t2, 3600)[0])) + '小时' + str(
-                    int(divmod(t2, 3600 / 60)[1])) + '分钟',
+                sheet.write(row1 + 8 + hangshu, 9, '平均落潮历时:' + str(round(divmod(t2, 3600)[0])) + '小时' + str(
+                    round(divmod(t2, 3600 / 60)[1])) + '分钟',
                             format_cn_a_left1)
                 sheet.merge_range(row1 + 8 + hangshu, 27, row1 + 8 + hangshu, 32, '月平均低潮潮高=',
                                   format_cn_a_right2)
-                sheet.merge_range(row1 + 8 + hangshu, 33, row1 + 8 + hangshu, 35, int(alpha * low.tide.mean()),
+                sheet.merge_range(row1 + 8 + hangshu, 33, row1 + 8 + hangshu, 35, round(alpha * low.tide.mean()),
                                   format_cn_a_left2)
                 ###############################################################################
                 sheet.write(row1 + 6 + hangshu, 15,
-                            '月 平 均 潮 差 = ' + str(int(alpha * numpy.mean(mon['diff'].dropna().values))),
+                            '月 平 均 潮 差 = ' + str(round(alpha * numpy.mean(mon['diff'].dropna().values))),
                             format_cn_a_left)
-                sheet.write(row1 + 7 + hangshu, 15, '月 最 大 潮 差 = ' + str(int(mon['diff'].max() * alpha)),
+                sheet.write(row1 + 7 + hangshu, 15, '月 最 大 潮 差 = ' + str(round(mon['diff'].max() * alpha)),
                             format_cn_a_left)
-                sheet.write(row1 + 8 + hangshu, 15, '月 最 小 潮 差 = ' + str(int(mon['diff'].min() * alpha)),
+                sheet.write(row1 + 8 + hangshu, 15, '月 最 小 潮 差 = ' + str(round(mon['diff'].min() * alpha)),
                             format_cn_a_left1)
                 #############################################################################
                 r_1 = row1 + 7
@@ -737,8 +744,6 @@ class Process_Tide(Tide):
         if not "原始数据" in sitename:
             self.change_altitude(sitename+'原始数据',diff)
 
-
-
     def display(self,site):
 
         df = self.data[site]
@@ -752,12 +757,11 @@ class Process_Tide(Tide):
 
 if __name__ == "__main__":
     for i in [11]:
-        filename1 = r"E:\★★★★★CODE★★★★★\Git\codes\ocean_hydrology_data_process\测试潮位 - 副本.xls"
-        filename2 = filename1.replace(filename1.split('.')[-1],'中间数据.xlsx')
-        filename3 = filename1.replace(filename1.split('.')[-1],'结果.xlsx')
+        filename1 = r"E:\★★★★★CODE★★★★★\Git\codes\ocean_hydrology_data_process\测试潮位.xls"
         t = Process_Tide(filename1)
         for i in t.sites:
             t.preprocess(i)
+        t.output(r"E:\★★★★★项目★★★★★\杂\test2.xlsx")
         """t.display()
         with open(r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\中间数据2012-3.html", 'w') as f:
             for _,v in t.html.items():
@@ -769,5 +773,3 @@ if __name__ == "__main__":
                 excel_writer.save()
         t.output(filename3)"""
         print('*****OK*****')
-
-
