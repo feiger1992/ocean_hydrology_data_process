@@ -1,8 +1,14 @@
 from functools import reduce
+from dxfwrite import DXFEngine as dxf
+
+import matplotlib.pyplot as plt
 import operator
 import pandas
 import numpy as np
 import datetime
+
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 east = lambda v, d: v * np.sin(d / 180 * np.pi)
 north = lambda v, d: v * np.cos(d / 180 * np.pi)
@@ -20,14 +26,12 @@ dir_in_360 = lambda d: dir_in_360b(d) if (dir_in_360b(d) > 0 and (dir_in_360b(d)
 str_from_datatime64 = lambda t: str(t)[:-31][-19:].replace('T', ' ')
 str_from_float = lambda t, n=2: str(round(t, n))
 
-
 def aoe(fun, v_es, v_ns):
     vs = []
     for i, j in zip(v_es, v_ns):
         v = fun(i, j)
         vs.append(v)
     return vs
-
 
 def is_time_of1(d):
     def raise_or_not(angle1, ang=0):  # 涨/落潮主方向
@@ -48,7 +52,6 @@ def is_time_of1(d):
 
     return raise_or_not
 
-
 def is_time_of(d):
     def raise_or_not(angle, ang=0):  # angle 为落潮方向
         if ang > 90:
@@ -64,7 +67,6 @@ def is_time_of(d):
             return -1
 
     return raise_or_not
-
 
 def get_duration(time_v_d):  # 统计涨落潮时间
     time_v_d = time_v_d[time_v_d.timeof != 0]
@@ -113,7 +115,7 @@ def get_duration(time_v_d):  # 统计涨落潮时间
             'last_time2': reduce(operator.add, ebb_times) / int(ebb_time)}
 
 
-class Current(object):
+class Current_pre_process(object):
     def __init__(self, filename, sheet_name=None, is_VD=True):
         if 'csv' in filename:
             self.df = pandas.read_csv(filename)
@@ -335,8 +337,6 @@ class Current(object):
 
         emerge.to_csv(outfile, sep=',', index=False, encoding='utf-8')
 
-
-f = str('filename.csv')
 """
 a = r"E:\★★★★★项目★★★★★\★★★★★双子山油品储运贸易基地陆域形成工程★★★★★\实测数据\小潮\C6sun\C6VD.xlsx"
 b = r"E:\★★★★★项目★★★★★\★★★★★双子山油品储运贸易基地陆域形成工程★★★★★\实测数据\小潮\C6sun\C6NE.csv"
@@ -357,31 +357,46 @@ c.save_result(b)
 """
 
 
-class Single_Tide_Point(object):
-    def __init__(self, filename, point, tide_type, angle, ang=0, zhang_or_luo=False, cengshu=6):  # False时，默认给出为落潮流向
+class One_Current_Point(object):
+    def __init__(self, point, angle, ang=0, zhang_or_luo=False, cengshu=6):
         self.point = point
-        self.tide_type = tide_type
-        self.filename = filename
         self.angle = angle
         self.ang = ang
         self.zhang_or_luo = zhang_or_luo
         self.cengshu = cengshu
+
+    def location(self, longitude=None, latitude=None, x=None, y=None):
+        if longitude and latitude:
+            self.longitude = longitude
+            self.latitude = latitude
+        if x and y:
+            self.x = x
+            self.y = y
+
+
+class Single_Tide_Point(One_Current_Point):
+    def __init__(self, filename, tide_type, point, angle, ang=0, zhang_or_luo=False, cengshu=6):  # False时，默认给出为落潮流向
+        One_Current_Point.__init__(self, point, angle, ang, zhang_or_luo, cengshu)
+        self.tide_type = tide_type
+        self.filename = filename
         data = pandas.read_csv(filename)
         self.cengs = []
-        if cengshu == 6:
+        if self.cengshu == 6:
             self.cengs.append(data[['time', 'v', 'd']])
             for i in range(0, 12, 2):
                 self.cengs.append(data[['time', 'v_' + str(i), 'd_' + str(i)]])
                 # 0为垂线，后面的依次是从上往下的层数
         self.ceng_processed = []
         for i in self.cengs:
-            self.ceng_processed.append(time_v_d(i, angle, ang=ang, zhang_or_luo=zhang_or_luo))
+            self.ceng_processed.append(time_v_d(i, self.angle, ang=self.ang, zhang_or_luo=self.zhang_or_luo))
+        self.cal_time_of_ave()
 
+    def cal_time_of_ave(self):
         self.time = self.cal_time(self.cengs[0])
         self.raise_time = self.time['last_time1']
         self.ebb_time = self.time['last_time2']
         self.first_ebb = False
-        if zhang_or_luo:  # 给出为涨潮流向时
+        if self.zhang_or_luo:  # 给出为涨潮流向时
             if not self.cengs[0].loc[0]['timeof'] == 1:  # 初次为落潮
                 self.first_ebb = True
                 # else:
@@ -395,7 +410,7 @@ class Single_Tide_Point(object):
             self.raise_time, self.ebb_time = self.ebb_time, self.raise_time
 
     def cal_time(self, tvd):
-        tvd['timeof'] = tvd['d'].apply(lambda x: is_time_of(x)(self.angle, self.ang))
+        tvd.loc[tvd.index, 'timeof'] = tvd['d'].apply(lambda x: is_time_of(x)(self.angle, self.ang))
         tvd = add_convert_row_to_tvd_and_timeof(tvd, self.angle)
         return get_duration(tvd)
 
@@ -431,18 +446,93 @@ class Single_Tide_Point(object):
         statistics['来源文件'] = self.filename
         return statistics
 
+    def change_one_dir_values(self, timeof=1, parameter=0.8):
+        changed = []
+        for i in self.ceng_processed:
+            changed.append(i.change_one_dir_values(timeof=timeof, parameter=parameter))
+        for i in range(0, 6):
+            changed[i + 1] = changed[i + 1].rename(columns={'v': 'v_' + str(i * 2), 'd': 'd_' + str(i * 2)})
+        self.changed_out = pandas.concat(changed, axis=1)
+        self.changed_out = self.changed_out.T.drop_duplicates().T
+        columns = ['t', 'v_0', 'd_0', 'v_2', 'd_2', 'v_4', 'd_4', 'v_6', 'd_6', 'v_8', 'd_8', 'v_10', 'd_10', 'v', 'd']
+        self.changed_out = self.changed_out[columns]
+        self.changed_out = self.changed_out.reindex_axis(columns, axis=1)
+        self.changed_out = self.changed_out.rename(columns={'t': 'time'})
+        return self.changed_out
+
+    def draw_dxf(self, parameter=10, ceng=0, drawing=None, *args):
+
+        def plot_line(x, y, vs, ds, cengshu, parameter):
+            for v, d in zip(vs, ds):
+                line = dxf.line((x, y), end_point(x, y, v, d, parameter))
+
+                drawing.add(line)
+                # layer_name = dxf.layer(cengshu+self.tide_type)
+                # drawing.layers.add(layer_name)
+                line['layer'] = cengshu + self.tide_type
+
+        def end_point(x, y, velocity, direction, parameter):
+            v_east = velocity * np.sin(direction / 180 * np.pi)
+            v_north = velocity * np.cos(direction / 180 * np.pi)
+            return [x + v_east * parameter, y + v_north * parameter]
+
+        data = self.ceng_processed[ceng].data
+        data = data[data['t'].apply(lambda t: t.minute) == 0]
+        if self.cengshu == 6:
+            cengshu_name = ['垂线平均', '表层', '0.2层', '0.4层', '0.6层', '0.8层', '底层']
+        else:
+            cengshu_name = ['垂线平均', '表层', '中层', '底层']
+        if not drawing:
+            drawing = dxf.drawing(self.point + '流速矢量图.dxf')
+        plot_line(self.x, self.y, data['v'], data['d'], cengshu_name[ceng], parameter)
+        if not drawing:
+            drawing.save()
+
+    def display(self):
+        e = []
+        n = []
+        timeof = []
+        parameter = 0.95 / self.ceng_processed[0].data['v'].values.max()
+
+        for i in self.ceng_processed:
+            data = i.data
+            e.append(east(data['v'] * parameter, data['d']).values)
+            n.append(north(data['v'] * parameter, data['d']).values)
+            timeof.append(data['timeof'])
+
+        fig, ax = plt.subplots(1, 1, figsize=(len(data), 8))
+        for i in range(1, 8):
+            for j in range(1, len(data) + 1):
+                if timeof[i - 1][j - 1] == -1:
+                    color = 'green'
+                else:
+                    color = 'red'
+                ax.arrow(j, i, e[7 - i][j - 1], n[7 - i][j - 1], head_width=0.1, head_length=0.1, fc=color, ec=color)
+        ax.set_xlim(0, len(data))
+        ax.set_ylim(0, len(self.ceng_processed) + 1)
+        ax.set_xlabel('时间', fontsize=20)
+        plt.yticks(range(8), ['', '底层', '0.8H', '0.6H', '0.4H', '0.2H', '表层', '垂线平均'], fontsize=20)
+        plt.title(self.point + self.tide_type, fontsize=25)
+        return fig
+
+    def output_txt(self):
+        out = self.output_all()
+
 
 class time_v_d(object):
     def __init__(self, data, angle, ang=0, zhang_or_luo=False):  # angle为落潮流向,ang为转流区域角度
         for i in data.columns:
             if 'v' in i:
-                data['v'] = data[i]
+                # data['v'] = data[i]
+                data.loc[data.index, 'v'] = data[i]
             if 'd' in i:
-                data['d'] = data[i]
+                data.loc[data.index, 'd'] = data[i]
             if 't' in i:
-                data['t'] = pandas.to_datetime(data[i])
+                # data['t'] = pandas.to_datetime(data[i])
+                data.loc[data.index, 't'] = pandas.to_datetime(data[i])
+
         self.data = data[['v', 'd', 't']]
-        self.data['timeof'] = self.data['d'].apply(lambda x: is_time_of(x)(angle, ang))
+        self.data.loc[self.data.index, 'timeof'] = self.data['d'].apply(lambda x: is_time_of(x)(angle, ang))
 
         fenzhangluo = self.data.groupby('timeof')
         for ii, jj in fenzhangluo:
@@ -451,6 +541,10 @@ class time_v_d(object):
             if ii == -1:
                 self.luo = v_and_d_of_one_dir(jj)
 
+    def change_one_dir_values(self, timeof=1, parameter=0.8):
+        list_to_change = self.data[self.data['timeof'] == timeof]
+        self.data.loc[list_to_change.index, 'v'] = list_to_change['v'] * parameter
+        return self.data
 
 class v_and_d_of_one_dir(object):
     def __init__(self, v_and_d):
@@ -459,12 +553,16 @@ class v_and_d_of_one_dir(object):
         self.extreme_d = v_and_d.loc[v_and_d['v'] == self.extreme_v]['d']
         t = (v_and_d.loc[v_and_d['v'] == self.extreme_v]['t'])
         self.extreme_t = t.values[0]
-        v_and_d['x'] = v_and_d['t'].apply(lambda x: x.minute)
+        # v_and_d['x'] = v_and_d['t'].apply(lambda x: x.minute)
+        v_and_d.loc[v_and_d.index, 'x'] = v_and_d['t'].apply(lambda x: x.minute)
         v_and_d2 = v_and_d[v_and_d['x'] == 0]
-        v_and_d2['v_e'] = v_and_d2.apply(lambda df: east(df['v'], df['d']), axis=1)
-        v_and_d2['v_n'] = v_and_d2.apply(lambda df: north(df['v'], df['d']), axis=1)
+        # v_and_d2['v_e'] = v_and_d2.apply(lambda df: east(df['v'], df['d']), axis=1)
+        v_and_d2.loc[v_and_d2.index, 'v_e'] = v_and_d2.apply(lambda df: east(df['v'], df['d']), axis=1)
+        # v_and_d2['v_n'] = v_and_d2.apply(lambda df: north(df['v'], df['d']), axis=1)10-23版本跟进pandas
+        v_and_d2.loc[v_and_d2.index, 'v_n'] = v_and_d2.apply(lambda df: north(df['v'], df['d']), axis=1)
         self.mean = velocity(v_and_d2.v_e.mean(), v_and_d2.v_n.mean())  # 平均流速为矢量各分量平均之后的合成流速
         self.mean_d = direction(v_and_d2.v_e.mean(), v_and_d2.v_n.mean())
+
 
     def output_str(self, zhang_or_luo):
         if zhang_or_luo == "zhang":
@@ -477,7 +575,6 @@ class v_and_d_of_one_dir(object):
         result += index + "流速最大为" + str_from_float(self.extreme_v), ',其对应流向为' + str_from_float(
             self.extreme_d.values[0]), '出现在' + str_from_datatime64(self.extreme_t)
         return result
-
 
 def time_A2B(time_A, v_A, dir_A, time_B, v_B, dir_B, dir_cal):
     # dir_cal为转流经过的方向，在实际应用中应为涨/落潮方向垂直角度
@@ -492,7 +589,6 @@ def time_A2B(time_A, v_A, dir_A, time_B, v_B, dir_B, dir_cal):
     mid_time = pandas.to_timedelta(projection_A / (projection_A + projection_B) * delta_time) + time_A
     return mid_time
 
-
 def add_convert_row_to_tvd_and_timeof(time_v_d, angle):
     # angle为涨、落潮角度
     n = len(time_v_d)
@@ -506,14 +602,15 @@ def add_convert_row_to_tvd_and_timeof(time_v_d, angle):
                                         'timeof': [A.timeof, B.timeof]})
             temp = temp.append(new_row, ignore_index=True)
     time_v_d = time_v_d.append(temp, ignore_index=True)
-    time_v_d = time_v_d.sort_index(by='t')
+    time_v_d = time_v_d.sort_values(by='t')
     time_v_d['time'] = time_v_d['t']
     return time_v_d
 
-
-c1 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv", point='C1', tide_type='大潮', angle=275)
+c1  = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv", point = 'C1', tide_type='大潮', angle=275)
 r"""
-c1  = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv",point = 'C1',tide_type='大潮',angle=275)
+
+c1.location(x = 7.5596,y = 6.0510)
+
 c1_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_x.csv",point = 'C1',tide_type='小潮',angle=275)
 
 c2 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C2_d.csv",point = 'C2',tide_type='大潮',angle=260)
@@ -531,16 +628,20 @@ c5_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C5_x.csv",poi
 c6 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C6_d.csv",point = 'C6',tide_type='大潮',angle=270)
 c6_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C6_x.csv",point = 'C6',tide_type='小潮',angle=270)
 print('*'*10)
+
 x = c1.output_all()
 a = [c1_x,c2,c2_x,c3,c3_x,c4,c4_x,c5,c5_x,c6,c6_x]
 for i in a :
     x2 = i.output_all()
     x = x.append(x2,ignore_index=True)
-print('OK')
 
-t = x.groupby(['Point','潮型','涨落潮'])
-x = x.set_index(['Point','潮型','涨落潮'])
-for i,j in t:
+
+#max_table = pandas.pivot_table(x,values = ['最大流速对应方向','最大流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
+#mean_table = pandas.pivot_table(x,values = ['平均流向','平均流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
+#tt = x.groupby(['Point','潮型','涨落潮'])
+#x = x.set_index(['Point','潮型','涨落潮'])
+"""
+r"""for i,j in tt:
     print(i)
     v = j['最大流速'].max()
     print(v)
@@ -550,6 +651,31 @@ for i,j in t:
     print('对应时间为'+str(t)+',最大流速对应方向为'+str(d)+',出现在层数'+str(ceng))
 x.to_csv(r"C:\Users\Feiger\Desktop\分析结果.csv",sep=',')
 #c0 = c.cengs[0]
-#tvd = time_v_d(c0,275)
+#tvd = time_v_d(c0,275)"""
 
+
+def draw_dxf(multi_point, parameter, filename):
+    drawing = dxf.drawing('filename')
+    for i in multi_point:
+        i.draw_dxf(drawing=drawing)
+    return drawing
+
+
+print('OK')
+r"""
+c1_x.location(x = 7.5596,y = 6.5501)
+c2_x.location(x = 4.2524,y = 5.6)
+c2.location(x = 4.2524,y = 5.6)
+c3.location(x = 2.6273,y = 4.801)
+c3_x.location(x = 2.6273,y = 4.801)
+c4.location(x = 5.3865,y = 5.106)
+c4_x.location(x = 5.3865,y = 5.106)
+c5.location(x = 4.3277,y = 3.791)
+c5_x.location(x = 4.3277,y = 3.791)
+c6.location(x = 7.5826,y = 3.8596)
+c6_x.location(x = 7.5826,y = 3.8596)
+
+d,x = [c1,c2,c3,c4,c5,c6],[c1_x,c2_x,c3_x,c4_x,c5_x,c6_x]
+a = draw_dxf(d,parameter=0.05,filename='大潮流速矢量图.dxf')
+a.save()
 """
