@@ -54,7 +54,7 @@ class M_window(QMainWindow):
         self.mid_s_Group = QGroupBox("测验概况")
         self.Tabs = QTabWidget()
         self.Tabs.setMaximumHeight(350)
-        self.Generate_all_button = QPushButton("生成报告及文档", clicked=self.show_pic)
+        self.Generate_all_button = QPushButton("生成报告及文档")
         centralLayout =  QVBoxLayout()
         centralLayout.addWidget(self.shower, stretch=40)
         centralLayout.addWidget(self.allGroup, stretch=10)
@@ -89,6 +89,7 @@ class M_window(QMainWindow):
     def set_signal_event(self):
         sig.load_tide_file_done.connect(self.tide_site_element_event)
         sig.msg_to_show.connect(self.show_msg_statusbar)
+        sig.load_current_file_done.connect(self.current_site_element_event)
 
     def show_msg_statusbar(self,msg):
         self.statusBar().showMessage(msg)
@@ -201,7 +202,7 @@ class M_window(QMainWindow):
         preprocess_thread.start()
         second = 0
         while preprocess_thread.is_alive():
-            sig.msg_to_show.emit('正在对' + sitename + '站点数据进行预处理，用时' + str(second) + '秒')
+            sig.msg_to_show.emit('正在对' + sitename + '站点数据进行预处理，用时' + str(round(second, 1)) + '秒')
             time.sleep(0.1)
             second += 0.1
         sig.msg_to_show.emit(sitename + '站数据预处理结束，请继续操作')
@@ -213,6 +214,11 @@ class M_window(QMainWindow):
         self.tides_control.sites_control[site].signal.show_tide_harmonic_result_signal.connect(
             self.display_tide_harmonic_result)
         self.tides_control.sites_control[site].signal.show_diff_signal.connect(self.show_pic)
+
+    def current_site_element_event(self, Point, tide_type):
+        self.current_control.Point_control[Point].tides_control[tide_type].signal.show_current_arrow_signal.connect(
+            self.show_pic)
+
 
 class TideTab(QWidget):
     def __init__(self,parent = None):
@@ -346,8 +352,13 @@ class Site_Tide_signal_event(QObject):
     show_tide_harmonic_result_signal = pyqtSignal(str, str, str)
     show_diff_signal = pyqtSignal(matplotlib.figure.Figure)
 
+
+class Site_Current_signal_event(QObject):
+    show_current_arrow_signal = pyqtSignal(matplotlib.figure.Figure)
+
 class All_Signal_event(QObject):
     load_tide_file_done = pyqtSignal(str, str)
+    load_current_file_done = pyqtSignal(str, str)
     msg_to_show = pyqtSignal(str)
 class Tide_Site_Tab(QWidget):
     def __init__(self,sitename,filename,parent = None):
@@ -771,8 +782,8 @@ class Current_Tab(QWidget):
     def welcome_init_tab(self):
         self.init_tab = Welcome_Tab("请载入单点潮流数据文件")
         # 测试单个测点tab
-        # self.sites_tab.addTab(self.init_tab, '未载入潮流数据')
-        self.sites_tab.addTab(Point_Tab("POINT1", tide_types=['大潮', '中潮', '小潮'], cengshu=6), 'POINT1')
+        self.sites_tab.addTab(self.init_tab, '未载入潮流数据')
+        # self.sites_tab.addTab(Point_Tab("POINT1", tide_types=['大潮', '中潮', '小潮'], cengshu=6), 'POINT1')
         self.init_tab.load_file_button.clicked.connect(self.open_current_file)
 
     def confirm_point(self):
@@ -881,6 +892,7 @@ class Class_Site_Tab(QWidget):
         super(Class_Site_Tab, self).__init__(parent)
         self.layout_element()
 
+
     def layout_element(self):
         self.lu_Group = QGroupBox("测点位置")
 
@@ -932,6 +944,7 @@ class Point_Tab(QWidget):
                                   zhang_or_luo=self.zhang_or_luo.isChecked(), Point=self.point, cengshu=self.cengshu)
             self.tides_control.update({tide_type: tab})
             self.tabs.addTab(tab, tide_type)
+            sig.load_current_file_done.emit(self.point, tide_type)  # 信号未绑定
 
         return generate_tab
 
@@ -950,6 +963,7 @@ class Single_Tide_tab(QWidget):
         super(Single_Tide_tab, self).__init__(parent)
         self.Point = Point
         self.cengshu = cengshu
+        self.signal = Site_Current_signal_event()
 
         self.tide_type = tide_type
         self.angle = angle
@@ -963,7 +977,7 @@ class Single_Tide_tab(QWidget):
     def layout_element(self):
         self.output_Button = QPushButton("输出潮流特征值")
         self.output_file_Button = QPushButton("输出潮流特征值文件", clicked=self.save_output)
-        self.draw_stream_Button = QPushButton("查看流速矢量图")
+        self.draw_stream_Button = QPushButton("查看流速矢量图", clicked=self.show_current_arrow)
 
         layout = QFormLayout()
         layout.addRow(self.output_Button)
@@ -971,6 +985,10 @@ class Single_Tide_tab(QWidget):
         layout.addRow(self.draw_stream_Button)
 
         self.setLayout(layout)
+
+    def show_current_arrow(self):
+        fig = c[self.Point + self.tide_type].display()
+        self.signal.show_current_arrow_signal.emit(fig)
 
     def save_output(self):
         out = c[self.Point + self.tide_type].output_all()
