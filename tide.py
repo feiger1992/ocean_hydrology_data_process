@@ -20,7 +20,11 @@ F = xlsxwriter.Workbook
 
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
-
+str_time_from_seconds = lambda seconds: str(round(divmod(seconds, 3600)[0])) + '小时' + str(
+    round(divmod(seconds, 3600)[1] / 60)) + '分钟'
+str_time_from_second2 = lambda t: '%s小时%s分钟' % (t.seconds // 3600, (t.seconds % 3600) // 60) if (
+                                                                                                t.seconds % 3600) % 60 < 30 else  '%s小时%s分钟' % (
+t.seconds // 3600, (t.seconds % 3600) // 60 + 1)
 
 def say_out(xxx):
     # 错误提示
@@ -45,11 +49,49 @@ class Tide(object):
         self.day = {}
         self.html = {}
         self.harmonic_result={}
+        self.out = {}
+        self.outtxt = {}
         self.sites = xlrd.open_workbook(filename=filename).sheet_names()
         for i in self.sites:
             self.data[i] = pandas.read_excel(self.filename, sheetname=i)
         if only_first_sheet:
             self.sites = self.sites[:1]
+
+    def tide_statics(self, site=None):
+        if site:
+            df = self.data[site]
+            out = {}
+            h = df[df.if_max == True]
+            l = df[df.if_min == True]
+            dif = df['diff'].dropna()
+            r_t = df.raising_time.dropna().values.mean()
+            e_t = df.ebb_time.dropna().values.mean()
+            out.update({'h_max': h.tide_init.values.max()})
+            out.update({'h_mean': h.tide_init.values.mean()})
+            out.update({'l_min': l.tide_init.values.min()})
+            out.update({'l_mean': l.tide_init.values.mean()})
+            out.update({'dif_mean': dif.mean()})
+            out.update({'dif_max': dif.max()})
+            out.update({'dif_min': dif.min()})
+            out.update({'raise_time': r_t})
+            out.update({'ebb_time': e_t})
+            self.out.update({site: out})
+            self.out_txt(site, out)
+        else:
+            for i in self.sites:
+                self.tide_statics(i)
+
+    def out_txt(self, site, tide_out):
+        num_txt = lambda num: str(round(num, 2))
+        s = ''
+        unit = '米' if (tide_out['dif_max'] < 10) else '厘米'
+        s += '潮位观测站' + site + '的平均潮位为' + num_txt(tide_out['h_mean']) + unit
+        s += ',平均高潮位为' + num_txt(tide_out['h_mean']) + unit + ',高潮位最高为' + num_txt(tide_out['h_max']) + unit
+        s += ',平均低潮位为' + num_txt(tide_out['l_mean']) + unit + ',低潮位最低为' + num_txt(tide_out['l_min']) + unit
+        s += ',平均潮差为' + num_txt(tide_out['dif_mean']) + unit + ',最大潮差为' + num_txt(tide_out['dif_max']) + unit
+        s += ',最小潮差为' + num_txt(tide_out['dif_min']) + unit + ',平均涨潮历时为' + str_time_from_second2(tide_out['raise_time'])
+        s += ',平均落潮历时为' + str_time_from_second2(tide_out['ebb_time'])
+        self.outtxt.update({site: s})
 
     def preprocess(self,s,threshold=10):
         try:
@@ -122,6 +164,7 @@ class Tide(object):
         self.month[s + '原始数据'] = month_tide2
         self.day[s] = day_tide
         self.day[s + '原始数据'] = day_tide2
+        self.tide_statics()
         print(s + "站预处理结束")
 
     def process_one(self, temp_data):
@@ -135,47 +178,63 @@ class Tide(object):
         temp_data.set_value(temp_data.index.min(), 'if_max', False)
         temp_data.set_value(temp_data.index.min(), 'if_min', False)
 
-        temp_data['diff'] = None
+        temp_data['diff'] = np.nan
 
-        temp_data['raising_time'] = None
-        temp_data['ebb_time'] = None
-        for x in temp_data.loc[temp_data.if_max == True].format_time:
-            try:
-                temp_data.loc[x, 'raising_time'] = x - temp_data[
-                    (temp_data.if_min == True) & (temp_data.format_time < x)].format_time.max()
-                temp_data.loc[x, 'diff'] = temp_data.loc[x, 'tide'] - temp_data.loc[temp_data[
-                                                                                        (
-                                                                                            temp_data.if_min == True) & (
-                                                                                            temp_data.format_time < x)].format_time.max(), 'tide']
-            except:
-                pass
+        temp_data['raising_time'] = np.nan
+        temp_data['ebb_time'] = np.nan
+
+        def calculate_time_diff(temp_data):
+            for x in temp_data.loc[temp_data.if_min == True].format_time:
+                try:
+                    temp_data.loc[x, 'ebb_time'] = x - temp_data[
+                        (temp_data.if_max == True) & (temp_data.format_time < x)].format_time.max()
+                    temp_data.loc[x, 'diff'] = temp_data.loc[temp_data[(temp_data.if_max == True) & (
+                        temp_data.format_time < x)].format_time.max(), 'tide'] - temp_data.loc[x, 'tide']
+                except:
+                    pass
+
+            for x in temp_data.loc[temp_data.if_max == True].format_time:
+                try:
+                    temp_data.loc[x, 'raising_time'] = x - temp_data[
+                        (temp_data.if_min == True) & (temp_data.format_time < x)].format_time.max()
+                    temp_data.loc[x, 'diff'] = temp_data.loc[x, 'tide'] - temp_data.loc[temp_data[
+                                                                                            (
+                                                                                                temp_data.if_min == True) & (
+                                                                                                temp_data.format_time < x)].format_time.max(), 'tide']
+                except:
+                    pass
+            return temp_data
+
 
 
                 ###############筛选极值
         #####根据潮差与涨落潮历时筛选
-        if temp_data['diff'].max() < 50:
-            temp_data['diff'] = temp_data['diff'] * 100
+        temp_data = calculate_time_diff(temp_data=temp_data)
 
-        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'diff'] = None
+        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'diff'] = np.nan
         temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'if_max'] = False
         temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'if_min'] = False
         temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'raising_time'] = 0
         temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'ebb_time'] = 0
 
-        temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'diff'] = None
+        temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'diff'] = np.nan
         temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'if_max'] = False
-        temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'raising_time'] = 0
+        temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'raising_time'] = np.nan
 
-        temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'diff'] = None
+        temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'diff'] = np.nan
         temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'if_min'] = False
-        temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'ebb_time'] = 0
+        temp_data.loc[temp_data[temp_data['ebb_time'] < datetime.timedelta(hours=2)].index, 'ebb_time'] = np.nan
 
         ###############根据大小潮个数筛选
         switch = temp_data.loc[temp_data.if_min == True].append(
             temp_data.loc[temp_data.if_max == True]).sort_index().index
         count_filtertime = 0
-        while (len(temp_data.loc[temp_data.if_min == True]) != len(temp_data.loc[temp_data.if_max == True])):
-
+        count = 0
+        while (len(temp_data.loc[temp_data.if_min == True]) != len(temp_data.loc[temp_data.if_max == True])) or (
+                count > 20 and abs(
+                    len(temp_data.loc[temp_data.if_min == True]) - len(temp_data.loc[temp_data.if_max == True])) > 28):
+            count += 1
+            print('第' + str(count) + '次筛选')
             print('低潮潮位个数' + str(len(temp_data.loc[temp_data.if_min == True])))
             print('高潮潮位个数' + str(len(temp_data.loc[temp_data.if_max == True])))
             if ((len(temp_data.loc[temp_data.if_min == True]) - len(temp_data.loc[temp_data.if_max == True]) == 1) or (
@@ -195,34 +254,29 @@ class Tide(object):
                         if temp_data.loc[switch[i - 1], 'if_max']:  # 后一个也是高潮
                             if temp_data.loc[switch[i], 'tide'] > temp_data.loc[switch[i - 1], 'tide']:  # 前面的i大,i-1为假
                                 temp_data.loc[switch[i - 1], 'if_max'] = False
-                                temp_data.loc[switch[i - 1], 'diff'] = None
-                                temp_data.loc[switch[i - 1], 'raising_time'] = None
+                                temp_data.loc[switch[i - 1], 'diff'] = np.nan
+                                temp_data.loc[switch[i - 1], 'raising_time'] = np.nan
                             else:
                                 temp_data.loc[switch[i], 'if_max'] = False
-                                temp_data.loc[switch[i], 'diff'] = None
-                                temp_data.loc[switch[i], 'raising_time'] = None
+                                temp_data.loc[switch[i], 'diff'] = np.nan
+                                temp_data.loc[switch[i], 'raising_time'] = np.nan
                     else:  # 自身低潮
                         if temp_data.loc[switch[i - 1], 'if_min']:  # 后一个也是低潮
                             if temp_data.loc[switch[i], 'tide'] < temp_data.loc[switch[i - 1], 'tide']:  # 前面的i较小,i-1为假
                                 temp_data.loc[switch[i - 1], 'if_min'] = False
-                                temp_data.loc[switch[i - 1], 'diff'] = False
-                                temp_data.loc[switch[i - 1], 'ebb_time'] = False
+                                temp_data.loc[switch[i - 1], 'diff'] = np.nan
+                                temp_data.loc[switch[i - 1], 'ebb_time'] = np.nan
                             else:
                                 temp_data.loc[switch[i], 'if_min'] = False
-                                temp_data.loc[switch[i], 'diff'] = False
-                                temp_data.loc[switch[i], 'ebb_time'] = False
+                                temp_data.loc[switch[i], 'diff'] = np.nan
+                                temp_data.loc[switch[i], 'ebb_time'] = np.nan
             switch = temp_data.loc[temp_data.if_min == True].append(
                 temp_data.loc[temp_data.if_max == True]).sort_index().index
             count_filtertime += 1
-        for x in temp_data.loc[temp_data.if_min == True].format_time:
-            try:
-                temp_data.loc[x, 'ebb_time'] = x - temp_data[
-                    (temp_data.if_max == True) & (temp_data.format_time < x)].format_time.max()
-                temp_data.loc[x, 'diff'] = temp_data.loc[temp_data[(temp_data.if_max == True) & (
-                    temp_data.format_time < x)].format_time.max(), 'tide'] - temp_data.loc[x, 'tide']
-            except:
-                pass
+        temp_data = calculate_time_diff(temp_data)
+
         return temp_data
+
 
     def harmonic_analysis(self, site, if_init=True):
         if if_init:
@@ -231,14 +285,12 @@ class Tide(object):
             self.harmonic_result.update(
                 {site: tt.t_tide(self.data[site]['tide'], dt=self.deltatime.total_seconds() / 3600)})
 
-    def plot_tide_compare(self, site='DongShuiGang', long=3, date1=None):
+    def plot_tide_compare(self, site=None):
+        if not site:
+            site = self.sites[0]
         temp_data = self.sitedata(site)
-        if date1 == None:
-            date1 = temp_data.format_time[1]
 
-        self.fig0, self.ax0 = plt.subplots(1, 1, figsize=(10 * long, 10), dpi=400)
-        fig = self.fig0
-        ax = self.ax0
+        fig, ax = plt.subplots(1, 1, figsize=(100, 100), dpi=400)
         day = mdates.DayLocator()  # every day
         hour = mdates.HourLocator()  # every hour
         dayFmt = mdates.DateFormatter('%m-%d')
@@ -247,23 +299,23 @@ class Tide(object):
         self.tt2 = temp_data.loc[temp_data.if_min == True].format_time  # 低潮时刻
         self.hh2 = temp_data.loc[temp_data.if_min == True].tide  # 低潮时间
 
-        line1, = ax.plot(temp_data.format_time, temp_data.tide_init, 'o', label='原始数据', color='yellow')
+        line1, = ax.plot(temp_data.format_time, temp_data.tide_init, 'o', markersize=1.5, label='原始数据', color='blue')
         line2, = ax.plot(temp_data.format_time, temp_data.tide, linewidth=0.5, color='black', label='去噪以后的数据')
 
-        line3, = ax.plot(self.tt1, self.hh1, marker='*', ls='', color='red', label='高潮时刻')
-        line4, = ax.plot(self.tt2, self.hh2, marker='*', ls='', color='magenta', label='低潮时刻')
+        line3, = ax.plot(self.tt1, self.hh1, marker='*', ls='', markersize=4, color='red', label='高潮时刻')
+        line4, = ax.plot(self.tt2, self.hh2, marker='*', ls='', markersize=4, color='green', label='低潮时刻')
 
-        plt.xlim(date1, date1 + datetime.timedelta(days=long))
 
-        plt.title(site)
         ax.xaxis.set_major_locator(day)
         ax.xaxis.set_major_formatter(dayFmt)
         ax.xaxis.set_minor_locator(hour)
-        if (temp_data.time.max() - temp_data.time.min()).days < 60:
-            ax.xaxis.set_minor_locator(hour)
-        ax.legend(handles=[line1, line2, line3, line4])
-        plt.savefig('拟合对比图-' + date1.strftime('%Y-%m-%d') + '.png')
-
+        # ax.legend(handles=[line1, line2],loc = 2,ncol=2, fontsize = 5)
+        # ax.legend(handles=[line1, line2], loc=3,bbox_to_anchor = (0,1,0.5,1.1))
+        ax.legend(handles=[line1, line2, line3, line4], fontsize=5)
+        plt.title(site)
+        ax.set_ylabel('潮位')
+        self.compare_fig = fig
+        # return fig
     def sitedata(self, sitename):
         return self.data.get(sitename)
 
@@ -281,7 +333,9 @@ class Tide(object):
                 else:
                     continue
             ss =self.data[s]
-            ss = ss.drop(['format_time','time'],axis=1)
+            ss = ss.drop(['format_time','time'], axis=1)
+            ss = ss.replace(np.nan, '', regex=True).replace(False, 'F', regex=True)
+
             for i in ss.index:
                 t = ss.loc[i, 'raising_time']
                 if t:
@@ -461,6 +515,7 @@ class Process_Tide(Tide):
             sheet.set_column('Z:AI', 3.5)
             sheet.set_column('AJ:AJ', 5)
             ##############################
+
             if max(x.data[site].index) - min(x.data[site].index) < datetime.timedelta(days=50):
                 try:
                     x.month[site] = [((x.month[site][0]).append((x.month[site][1]))).sort_index()]
@@ -586,8 +641,7 @@ class Process_Tide(Tide):
                 #    hangshu += 1
                 #   print('+++++')
 
-                sheet.write(row1 + 8 + hangshu, 2, '平均涨潮历时:' + str(round(divmod(t1, 3600)[0])) + '小时' + str(
-                    round(divmod(t1, 3600)[1] / 60)) + '分钟',
+                sheet.write(row1 + 8 + hangshu, 2, '平均涨潮历时:' + str_time_from_seconds(t1),
                             format_cn_a_left1)
 
                 sheet.merge_range(row1 + 8 + hangshu, 21, row1 + 8 + hangshu, 25, '月平均高潮潮高=',
@@ -625,9 +679,7 @@ class Process_Tide(Tide):
                 t2 = t2 / len(low.dropna().index)
 
                 print(t2)
-                sheet.write(row1 + 8 + hangshu, 9, '平均落潮历时:' + str(round(divmod(t2, 3600)[0])) + '小时' + str(
-                    round(divmod(t2, 3600 / 60)[1])) + '分钟',
-                            format_cn_a_left1)
+                sheet.write(row1 + 8 + hangshu, 9, '平均落潮历时:' + str_time_from_seconds(t2), format_cn_a_left1)
                 sheet.merge_range(row1 + 8 + hangshu, 27, row1 + 8 + hangshu, 32, '月平均低潮潮高=',
                                   format_cn_a_right2)
                 sheet.merge_range(row1 + 8 + hangshu, 33, row1 + 8 + hangshu, 35, round(alpha * low.tide.mean()),
@@ -670,7 +722,6 @@ class Process_Tide(Tide):
                 sheet.write_blank(row1 + 6 + hangshu, 0, None, format_l)
                 sheet.write_blank(row1 + 7 + hangshu, 0, None, format_l)
                 sheet.write_blank(row1 + 8 + hangshu, 0, None, format_lb)
-
                 ################################################################################标题
                 sheet.write(row1, 0, '潮位观测报表:', format_title1)
                 sheet.write(row1 + 1, 0, '工程名称：', format_title2)
@@ -755,14 +806,16 @@ class Process_Tide(Tide):
         h = h.replace('None',' ').replace('NaT','').replace('0 days','').replace('format_time','时间').replace('tide_init','初始潮位').replace('tide','潮位（去噪）').replace('diff','潮差').replace('raising_time','涨潮时间').replace('ebb_time','落潮时间').replace('nan','').replace('<table id=','<table border="1" id=')
         self.html.update({site:h})
 
+
 if __name__ == "__main__":
-    for i in [11]:
-        filename1 = r"E:\★★★★★CODE★★★★★\Git\codes\ocean_hydrology_data_process\测试潮位.xls"
-        t = Process_Tide(filename1)
-        for i in t.sites:
-            t.preprocess(i)
-        t.output(r"E:\★★★★★项目★★★★★\杂\test2.xlsx")
-        """t.display()
+    filename = r"E:\★★★★★项目★★★★★\杂\嵊泗20170809潮位（十分钟）.xls"
+    t = Process_Tide(filename)
+    t.preprocess('嵊泗', 30)
+    t.output(r"C:\Users\Feiger\Desktop\2.xlsx", reference_system='当地基面')
+    # t.out_put_mid_data("E:\★★★★★项目★★★★★\杂\嵊泗中间结果.xlsx", '嵊泗')
+
+    # t.output(r"E:\★★★★★项目★★★★★\杂\嵊泗报表222.xlsx",reference_system='当地基面')
+    """t.display()
         with open(r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\中间数据2012-3.html", 'w') as f:
             for _,v in t.html.items():
                 f.write(v)
@@ -772,4 +825,4 @@ if __name__ == "__main__":
                 v.to_excel(excel_writer,sheet_name=key)
                 excel_writer.save()
         t.output(filename3)"""
-        print('*****OK*****')
+    print('*****OK*****')
