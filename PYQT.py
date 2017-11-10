@@ -4,6 +4,7 @@ from PyQt5.QtGui import QStandardItemModel, QValidator, QDoubleValidator, QPixma
 from PyQt5.QtWidgets import QApplication, QMainWindow,QAction,QLabel,QVBoxLayout, QFormLayout,QLineEdit,QSpinBox, QTableView,QFileDialog,QTextBrowser,QLayout,QGroupBox,QHBoxLayout,QTabWidget,QPushButton,QWidget,QCheckBox,QMessageBox,QDialog,QDateTimeEdit,QComboBox,QDialogButtonBox,QErrorMessage,QDoubleSpinBox,QInputDialog,QTextEdit
 from PyQt5.QtWebKitWidgets  import QWebView
 from threading import Thread
+import queue
 import sys,time
 import pandas
 sys.path.append('~/tide.py')
@@ -22,7 +23,8 @@ np.random.seed(19680801)
 data = np.random.randn(2, 100)
 
 dir_of_file = lambda filename: filename.replace(list(filename.split(sep='\\'))[-1], '')
-
+str_from_df = lambda item: item.values[0]
+num_from_df = lambda item: str(round(item.values[0], 2))
 
 # 通知栏         QMessageBox.information(self,'通知标题',"内容")
 class M_window(QMainWindow):
@@ -41,14 +43,15 @@ class M_window(QMainWindow):
 
     def initUI(self):
 
-
-        self.setWindowTitle('')
+        self.setWindowTitle('中交三航院水文数据处理软件')
         self.resize(1000, 618)
         self.statusBar()
         #self.createMenu()
         centralWidget = QWidget()
 
         self.shower = QTabWidget()
+        self.gen_welcome_web()
+        self.shower.addTab(self.welcome_tab, '欢迎页面')
         self.allGroup = QGroupBox()
         self.mid_l_Group = QGroupBox()
         self.mid_s_Group = QGroupBox("测验概况")
@@ -62,7 +65,7 @@ class M_window(QMainWindow):
         self.setCentralWidget(centralWidget)
 
         allGroupLayout = QHBoxLayout()
-        allGroupLayout.addWidget(self.mid_l_Group, stretch=3)
+        # allGroupLayout.addWidget(self.mid_l_Group, stretch=3)
         allGroupLayout.addWidget(self.Tabs, stretch=30)
         self.allGroup.setLayout(allGroupLayout)
         #测试潮流，将潮位部分取消
@@ -71,6 +74,12 @@ class M_window(QMainWindow):
 
         self.current_control = Current_Tab()
         self.Tabs.addTab(self.current_control, '潮流')
+
+        self.wind_control = Wind_Tab()
+        self.Tabs.addTab(self.wind_control, '气象')
+
+        self.wave_control = Wave_tab()
+        self.Tabs.addTab(self.wave_control, '波浪')
 
         mid_l_GroupLayout = QVBoxLayout()
         mid_l_GroupLayout.addWidget(self.mid_s_Group)
@@ -86,10 +95,19 @@ class M_window(QMainWindow):
         mid_s_GroupLayout.addRow(Button_Save_Info)
         self.mid_s_Group.setLayout(mid_s_GroupLayout)
 
+    def gen_welcome_web(self):
+        self.welcome_tab = QTextBrowser()
+        self.welcome_tab.setHtml(
+            r"<!DOCTYPE html>\n<html>\n<head>\n<title>Page Title</title>\n</head>\n<body>\n\n<h1>欢迎使用本水文处理软件，请在底部标签页选择需要使用的模块</h1>\n<p>潮位</p>\n<p>潮流</p>\n<p>气象</p>\n<p>波浪</p>\n<p>更多功能正在开发中···</p>\n\n</body>\n</html>\n".replace(
+                '\\n', '')
+        )
+
     def set_signal_event(self):
         sig.load_tide_file_done.connect(self.tide_site_element_event)
         sig.msg_to_show.connect(self.show_msg_statusbar)
         sig.load_current_file_done.connect(self.current_site_element_event)
+
+        self.current_control.sig.show_all_out_signal.connect(self.display)
 
     def show_msg_statusbar(self,msg):
         self.statusBar().showMessage(msg)
@@ -191,7 +209,7 @@ class M_window(QMainWindow):
         self.display(category='TXT', title=site,
                      content=t[filename].data[site].to_string(columns=columns, index_names=False).replace('None',
                                                                                                           ' ' * 4).replace(
-                         'False', ' ' * 5), tip=tip)
+                         'False', ' ' * 5).replace('NaN', ' ' * 3), tip=tip)
 
     def display_tide_harmonic_result(self, filename, site, tip):
         self.display(category='TXT', title=site + '调和分析结果', content=t[filename].harmonic_result[site].classic_style(),
@@ -214,10 +232,14 @@ class M_window(QMainWindow):
         self.tides_control.sites_control[site].signal.show_tide_harmonic_result_signal.connect(
             self.display_tide_harmonic_result)
         self.tides_control.sites_control[site].signal.show_diff_signal.connect(self.show_pic)
+        self.tides_control.sites_control[site].signal.show_tide_statics_signal.connect(self.display)
+
 
     def current_site_element_event(self, Point, tide_type):
         self.current_control.Point_control[Point].tides_control[tide_type].signal.show_current_arrow_signal.connect(
             self.show_pic)
+        self.current_control.Point_control[Point].tides_control[
+            tide_type].signal.show_current_proper_TXT_signal.connect(self.display)
 
 
 class TideTab(QWidget):
@@ -240,6 +262,7 @@ class TideTab(QWidget):
         #self.check_if_null = QCheckBox("潮位补全")
         self.del_data = QPushButton("删除当前潮位数据",clicked = self.del_all_data)
         self.tide_d_Group = QGroupBox("其他")
+        self.tide_d2_Group = QGroupBox('文档输出')
 
         self.errorMessageDialog = QErrorMessage(self)
         self.errorLabel = QLabel()
@@ -250,6 +273,7 @@ class TideTab(QWidget):
         tide_l_Group_Layout.addWidget(self.auto_Preprocess)
         tide_l_Group_Layout.addWidget(self.if_one_sheet)
         tide_l_Group_Layout.addWidget(self.tide_d_Group)
+        tide_l_Group_Layout.addWidget(self.tide_d2_Group)
 
         self.tide_l_Group.setLayout(tide_l_Group_Layout)
 
@@ -258,7 +282,16 @@ class TideTab(QWidget):
         tide_d_Group_Layout.addWidget(self.check_multifile)
         tide_d_Group_Layout.addWidget(self.del_data)
 
+        self.show_statics = QPushButton('显示各站点统计结果')
+        self.gen_document = QPushButton('生成总报告')
+
+        tide_d2_Group_Layout = QVBoxLayout()
+        tide_d2_Group_Layout.addWidget(self.show_statics)
+        tide_d2_Group_Layout.addWidget(self.gen_document)
+
         self.tide_d_Group.setLayout(tide_d_Group_Layout)
+        self.tide_d2_Group.setLayout(tide_d2_Group_Layout)
+
         self.sites_Tab = QTabWidget()
 
         #调试site_tab 用
@@ -302,7 +335,8 @@ class TideTab(QWidget):
                         second = 0
                         tide_thread.start()
                         while tide_thread.is_alive():
-                            sig.msg_to_show.emit("正在进行数据预处理，数据来自文件" + fileName[0] + ',处理用时' + str(second) + '秒')
+                            sig.msg_to_show.emit(
+                                "正在进行数据预处理，数据来自文件" + fileName[0] + ',处理用时' + str(round(second, 1)) + '秒')
                             time.sleep(0.1)
                             second += 0.1
                         sig.msg_to_show.emit(fileName[0] + '文件处理完毕')
@@ -348,13 +382,20 @@ class Site_Tide_signal_event(QObject):
     tide_preprocess = pyqtSignal(str, str, float)
     show_tide_HTML_signal = pyqtSignal(str, str, str)
     show_tide_TXT_signal = pyqtSignal(str, str, str)
+    show_tide_statics_signal = pyqtSignal(str, str, str, str)
     save_one_site_signal = pyqtSignal(str, str)
     show_tide_harmonic_result_signal = pyqtSignal(str, str, str)
     show_diff_signal = pyqtSignal(matplotlib.figure.Figure)
 
-
 class Site_Current_signal_event(QObject):
+    show_current_proper_TXT_signal = pyqtSignal(str, str, str)
     show_current_arrow_signal = pyqtSignal(matplotlib.figure.Figure)
+
+
+class All_Current_signal_event(QObject):
+    show_all_out_signal = pyqtSignal(str, str, str)
+    show_max_out_signal = pyqtSignal(str, str, str)
+    show_mean_out_signal = pyqtSignal(str, str, str)
 
 class All_Signal_event(QObject):
     load_tide_file_done = pyqtSignal(str, str)
@@ -370,12 +411,13 @@ class Tide_Site_Tab(QWidget):
 
     def layout_element(self):
         self.lu_Group = QGroupBox("测点位置")
+        self.lu_Group.setFixedWidth(150)
         self.ld_Group = QGroupBox("起止时间")
         self.mid_Group_out = QGroupBox("潮位查看")
         self.mid_Group_in = QGroupBox("调整去噪度")
         self.r_Group = QGroupBox("结果输出")
         self.r_in_Group_u = QGroupBox("调和分析")
-        self.r_in_Group_d = QGroupBox("文档输出")
+        self.r_in_Group_d = QGroupBox("查看统计结果")
         #self.add_Group1 = QGroupBox("施测信息")
         self.add_Group2 = QGroupBox("高程基准")
         self.add_Group = QGroupBox()
@@ -445,7 +487,7 @@ class Tide_Site_Tab(QWidget):
         self.confirmButton = QPushButton("数据处理",clicked=self.preprocess_click)
         self.Process_threshold = QSpinBox()
         self.Process_threshold.setRange(1, 100)
-        self.Process_threshold.setValue(5)
+        self.Process_threshold.setValue(30)
         mid_Group_out.addWidget(self.Show_tide_data_button1)
         mid_Group_out.addWidget(self.Show_tide_data_button2)
         mid_Group_out.addWidget(self.Show_tide_data_button3)
@@ -465,20 +507,21 @@ class Tide_Site_Tab(QWidget):
         self.analysis_by_init_data = QCheckBox("使用原始数据计算")
         self.Theoretical_Mininum_tidal_leval = QPushButton("计算对应理论最低潮面")
         self.Theoretical_Mininum_tidal_leval.setEnabled(False)
-        self.Is_Output_Report = QCheckBox("输出文字报告")
-        self.Is_Output_mid_Document = QCheckBox("输出分析文档")
+        self.document_out_button = QPushButton("输出文字统计", clicked=self.show_statics_click)
+        self.show_statics_button = QPushButton("查看统计结果")
         r_Group.addRow(self.Save_Sheet_Button,self.Save_Mid_Data_Button)
         r_Group.addRow(self.r_in_Group_u)
         r_in_Group_u = QFormLayout()
         r_in_Group_u.addRow(self.Astronomical_Tide_Analysis)
         r_in_Group_u.addRow(self.analysis_by_init_data)
-        r_in_Group_u.addRow(self.Theoretical_Mininum_tidal_leval)
+        #r_in_Group_u.addRow(self.Theoretical_Mininum_tidal_leval)
 
         self.r_in_Group_u.setLayout(r_in_Group_u)
+
         r_Group.addRow(self.r_in_Group_d)
         r_in_Group_d = QFormLayout()
-        r_in_Group_d.addRow(self.Is_Output_Report)
-        r_in_Group_d.addRow(self.Is_Output_mid_Document)
+        # r_in_Group_d.addRow(self.show_statics_button)
+        r_in_Group_d.addRow(self.document_out_button)
         self.r_in_Group_d.setLayout(r_in_Group_d)
         self.r_Group.setLayout(r_Group)
 
@@ -500,8 +543,17 @@ class Tide_Site_Tab(QWidget):
                                                '处理阀值为：' + str(self.Process_threshold.value()))
 
     def show_diff_pic(self):
+        #plot_thread = Thread(target=t[self.filename].plot_tide_compare,kwargs={'site':self.sitename})
         self.fig = t[self.filename].plot_tide_compare(self.sitename)
-        self.signal.show_diff_signal.emit(self.fig)
+        self.signal.show_diff_signal.emit(t[self.filename].compare_fig)
+        """plot_thread.start()
+        second = 0
+        while plot_thread.is_alive():
+            sig.msg_to_show.emit('正在生成交互图形,处理用时'+str(round(second,1))+'秒')
+            time.sleep(0.1)
+            second += 0.1
+        sig.msg_to_show.emit(self.sitename+'站图形生成完毕')
+        self.signal.show_diff_signal.emit(t[self.filename].compare_fig)"""
 
 
     def show_tide_TXT_click(self):
@@ -516,10 +568,15 @@ class Tide_Site_Tab(QWidget):
         html_process_thread.start()
         second = 0
         while html_process_thread.is_alive():
-            sig.msg_to_show.emit('正在生成潮位对应HTML文件，处理用时' + str(second) + '秒')
-            time.sleep(0.2)
-            second += 0.2
+            sig.msg_to_show.emit('正在生成潮位对应HTML文件，处理用时' + str(round(second, 1)) + '秒')
+            time.sleep(0.1)
+            second += 0.1
         sig.msg_to_show.emit(self.filename + '文件中的' + self.sitename + '站HTML潮位显示处理完毕')
+
+    def show_statics_click(self):
+        self.signal.show_tide_statics_signal.emit('TXT', self.sitename + '潮位特征值',
+                                                  t[self.filename].outtxt[self.sitename].replace(',', '\n\t\t').replace(
+                                                      '的', '的统计结果如下:\n\t\t'), '数据源文件为' + self.filename)
 
     def save_one_site_tide_clicked(self):
         self.signal.save_one_site_signal.emit(self.filename,self.sitename)
@@ -627,7 +684,9 @@ class Current_Tab(QWidget):
         self.Point_control = {}
         self.list_of_all_current_out = []
         self.all_current_out = None
-        self.welcome_init_tab()
+        # self.welcome_init_tab()
+        self.sig = All_Current_signal_event()
+        self.filename = None
 
     def bed_group_Layout(self):
         r_group_layout = QFormLayout()
@@ -643,7 +702,8 @@ class Current_Tab(QWidget):
         self.bed_count.addItem('六层法')
         self.bed_count.addItem('三层法（尚未开发）')
         self.first_bin = QDoubleSpinBox()
-        self.first_bin.setToolTip("输入首层高度，单位为米")
+        self.first_bin.setValue(0.7)
+        self.first_bin.setToolTip("输入仪器探头在水下的深度，单位为米")
         self.bin_height = QDoubleSpinBox()
         self.bin_height.setValue(1.0)
         self.bin_height.setToolTip('设置单层高度，单位为米')
@@ -666,7 +726,7 @@ class Current_Tab(QWidget):
         r_group_layout.addRow(self.if_vd)
         # r_group_layout.addRow(QLabel("总层数选择"))
         # r_group_layout.addRow(self.bed_count)
-        r_group_layout.addRow("首层高度", self.first_bin)
+        r_group_layout.addRow("入水深度", self.first_bin)
         r_group_layout.addRow("每层高度", self.bin_height)
         r_group_layout.addRow("表层流速比例", self.top_ratio)
         r_group_layout.addRow("底层流速比例", self.button_ratio)
@@ -704,7 +764,8 @@ class Current_Tab(QWidget):
         self.save_Point_and_Tidetype_count = QPushButton('确认测点、潮型总数', clicked=self.confirm_point)
         self.change_Point_name = QLineEdit()
         self.change_Point_name.setMaximumHeight(15)
-        self.save_all_out_Button = QPushButton("汇总所有测流结果", clicked=self.save_all_out)
+        self.show_all_out_Button = QPushButton("查看所有测流结果", clicked=self.show_all_out)
+        self.save_all_out_Button = QPushButton('保存', clicked=self.save_all_out)
         self.save_max_out_Button = QPushButton("汇总流速最大值结果", clicked=self.save_max_out)
         self.save_mean_out_Button = QPushButton("汇总流速平均值结果", clicked=self.save_mean_out)
 
@@ -717,7 +778,7 @@ class Current_Tab(QWidget):
         l_group_layout.addRow(self.change_Point_name)
         l_group_layout.addRow(self.save_mean_out_Button)
         l_group_layout.addRow(self.save_max_out_Button)
-        l_group_layout.addRow(self.save_all_out_Button)
+        l_group_layout.addRow(self.show_all_out_Button, self.save_all_out_Button)
 
         l_group_layout.addRow(self.del_data)
 
@@ -745,24 +806,58 @@ class Current_Tab(QWidget):
         self.setLayout(mainLayout)
 
     def gen_all_current_out(self):
-        if len(c) != self.Point_count.values() and c:
+
+        try:
+            if len(c) != self.Point_count.value() * len(self.Tide_types) or not c:
+                QMessageBox.information(self, '通知',
+                                    "请载入所有点位对应数据后再点击")
+            elif not self.list_of_all_current_out:
+                for _, j in c.items():
+                    self.list_of_all_current_out.append(j.output_all())
+            self.all_current_out = pandas.concat(self.list_of_all_current_out)
+
+        except:
             QMessageBox.information(self, '通知',
                                     "请载入所有点位对应数据后再点击")
-        elif not self.list_of_all_current_out:
-            for _, j in c.items():
-                self.list_of_all_current_out.append(j.output_all())
-        self.all_current_out = pandas.concat(self.list_of_all_current_out)
 
+    def ave_out(self):
+        def str_type(point_type_re):
+            s = ''
+            s += '测点' + point_type_re[0] + '在' + point_type_re[1] + point_type_re[2] + '时'
+
+        def out_ave_txt_c(row):
+            return str_from_df(row['层数']) + '的平均流速为' + num_from_df(row['平均流速']) + 'cm/s,平均流向为' + num_from_df(
+                row['平均流向']) + '°,'
+
+        try:
+            g3 = self.all_current_out.groupby(['Point', '潮型', '涨落潮'])
+            l_cengshu = ['表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层', '垂线平均']
+            s = ''
+            for i, j in g3:
+                s += str_type(i)
+                for ceng in l_cengshu:
+                    s += out_ave_txt_c(j[j['层数'] == ceng])
+            return s
+        except:
+            self.gen_all_current_out()
+            self.ave_out()
     def save_csv(self, df):
         options = QFileDialog.Options()
-        filename, _ = QFileDialog.getSaveFileName(self, "保存所有点位特征值文件", "E:", "csv文档 (*.csv)",
+        filename, _ = QFileDialog.getSaveFileName(self, "保存所有点位特征值文件", dir_of_file(self.filename), "csv文档 (*.csv)",
                                                   options=options)
+        self.filename = filename
         df.to_csv(filename)
 
-    def save_all_out(self):
+    def show_all_out(self):
         self.gen_all_current_out()
         self.all_current_out = self.all_current_out[
             ['Point', '潮型', '层数', '涨落潮', '平均流速', '平均流向', '最大流速', '最大流速对应方向', '出现时间', '来源文件']]
+
+        self.sig.show_all_out_signal.emit('TXT', '潮流计算结果汇总', self.all_current_out.to_string())
+        ######
+
+    def save_all_out(self):
+        self.gen_all_current_out()
         self.save_csv(self.all_current_out)
 
     def save_max_out(self):
@@ -837,8 +932,9 @@ class Current_Tab(QWidget):
         sig.msg_to_show.emit("文件转化结束")
 
     def open_current_file(self):
-        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", "E:", "逗号分割文档 (*.csv)",
+        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", dir_of_file(self.filename), "逗号分割文档 (*.csv)",
                                                   options=self.options)
+        self.filename = fileName
         return fileName
 
     def clear_tab(self):
@@ -853,7 +949,7 @@ class Current_Tab(QWidget):
         if reply == QMessageBox.Yes:
             c.clear()
             self.clear_tab()
-            self.welcome_init_tab()
+            #self.welcome_init_tab()
 
 
         else:
@@ -887,6 +983,58 @@ class Current_Tab(QWidget):
         except:
             pass
 
+
+class Wind_Tab(QWidget):
+    def __init__(self, parent=None):
+        super(Wind_Tab, self).__init__(parent)
+        self.layout_element()
+
+    def layout_element(self):
+        self.load_file = QPushButton('载入测风数据')
+        self.load_file.setFixedHeight(50)
+        self.statics = QPushButton('测风数据统计分析')
+        self.statics.setFixedHeight(50)
+        self.fig = QPushButton('查看各风向频率分布图')
+        self.fig.setFixedHeight(50)
+
+        self.to_document = QPushButton('生成气象报告')
+        self.to_document.setFixedHeight(50)
+
+        mainLayout = QVBoxLayout()
+        mainLayout.addWidget(self.load_file)
+        mainLayout.addWidget(self.statics)
+        mainLayout.addWidget(self.fig)
+        mainLayout.addWidget(self.to_document)
+
+        self.setLayout(mainLayout)
+
+
+class Wave_tab(QWidget):
+    def __init__(self, parent=None):
+        super(Wave_tab, self).__init__(parent)
+        self.layout_element()
+
+    def layout_element(self):
+        self.load_file = QPushButton('载入波浪数据')
+        self.load_file.setFixedHeight(50)
+        self.statics = QPushButton('波浪数据统计分析')
+        self.statics.setFixedHeight(50)
+        self.fig = QPushButton('查看各波向频率分布图')
+        self.fig.setFixedHeight(50)
+        self.joint_distribution = QPushButton('查看各波高-周期联合分布图')
+        self.joint_distribution.setFixedHeight(50)
+        self.to_document = QPushButton('生成对应波浪报告')
+        self.to_document.setFixedHeight(50)
+
+        mainLayout = QVBoxLayout()
+        mainLayout.addWidget(self.load_file)
+        mainLayout.addWidget(self.statics)
+        mainLayout.addWidget(self.joint_distribution)
+        mainLayout.addWidget(self.fig)
+        mainLayout.addWidget(self.to_document)
+
+        self.setLayout(mainLayout)
+
 class Class_Site_Tab(QWidget):
     def __init__(self, sitename, filename, parent=None):
         super(Class_Site_Tab, self).__init__(parent)
@@ -905,6 +1053,7 @@ class Point_Tab(QWidget):
         self.cengshu = cengshu
         self.layout_element()
         self.tides_control = {}
+        self.filename = 'E:'
 
     def layout_element(self):
         l_Group = QGroupBox("流向设置")
@@ -918,6 +1067,7 @@ class Point_Tab(QWidget):
         self.load_Spring_file = QPushButton('载入大潮文件', clicked=self.Spring_file_open)
         self.load_Mid_file = QPushButton('载入中潮文件', clicked=self.Mid_file_open)
         self.load_Neap_file = QPushButton('载入小潮文件', clicked=self.Neap_file_open)
+        self.clear_file_button = QPushButton('清除站点文件', clicked=self.clear_file)
         l_GroupLayout = QFormLayout()
         l_GroupLayout.addRow(self.angle)
         l_GroupLayout.addRow(self.zhang_or_luo)
@@ -925,6 +1075,9 @@ class Point_Tab(QWidget):
         if len(self.tide_types) == 3:
             l_GroupLayout.addRow(self.load_Mid_file)
         l_GroupLayout.addRow(self.load_Neap_file)
+
+        l_GroupLayout.addRow(self.clear_file_button)
+
 
         l_Group.setLayout(l_GroupLayout)
 
@@ -936,22 +1089,37 @@ class Point_Tab(QWidget):
 
     def One_tide_file_open(self):
         options = QFileDialog.Options()
-        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", "E:",
+        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", dir_of_file(self.filename),
                                                   "逗号分隔文档 (*.csv)", options=options)
+        self.filename = fileName
 
-        def generate_tab(tide_type):
+        def generate_tab(tide_type, **kwargs):
+            sig.msg_to_show.emit('正在载入' + tide_type + '文件,请稍候')
             tab = Single_Tide_tab(filename=fileName, tide_type=tide_type, angle=self.angle.value(),
                                   zhang_or_luo=self.zhang_or_luo.isChecked(), Point=self.point, cengshu=self.cengshu)
             self.tides_control.update({tide_type: tab})
             self.tabs.addTab(tab, tide_type)
-            sig.load_current_file_done.emit(self.point, tide_type)  # 信号未绑定
-
+            sig.load_current_file_done.emit(self.point, tide_type)
+            sig.msg_to_show.emit(self.point + '站' + tide_type + '数据文件载入结束，请继续操作')
         return generate_tab
+
+    def clear_file(self):
+        self.tides_control.clear()
+        self.tabs.clear()
+        x = []
+        for i in c.keys():
+            if self.point in i:
+                x.append(i)
+        for i in x:
+            c.pop(i)
+            sig.msg_to_show.emit(i + '已经清除')
+        sig.msg_to_show.emit(self.point + '所载入文件已全部清除')
 
     def Spring_file_open(self):
         self.One_tide_file_open()('大潮')
 
     def Neap_file_open(self):
+
         self.One_tide_file_open()('小潮')
 
     def Mid_file_open(self):
@@ -969,15 +1137,24 @@ class Single_Tide_tab(QWidget):
         self.angle = angle
         self.zhang_or_luo = zhang_or_luo
         self.filename = filename
+
         c.update({self.Point + self.tide_type: Single_Tide_Point(filename=self.filename, tide_type=tide_type,
                                                                  point=Point, angle=angle, zhang_or_luo=zhang_or_luo,
                                                                  cengshu=cengshu)})
+        preprocess_thread = Thread(target=c[self.Point + self.tide_type].preprocess)
+        second = 0
+        preprocess_thread.start()
+        while preprocess_thread.is_alive():
+            sig.msg_to_show.emit('正在对' + self.tide_type + '文件进行预处理，用时' + str(round(second, 1)) + '秒')
+            time.sleep(0.1)
+            second +=0.1
+
         self.layout_element()
 
     def layout_element(self):
-        self.output_Button = QPushButton("输出潮流特征值")
+        self.output_Button = QPushButton("输出潮流特征值", clicked=self.show_current_proper_TXT_click)
         self.output_file_Button = QPushButton("输出潮流特征值文件", clicked=self.save_output)
-        self.draw_stream_Button = QPushButton("查看流速矢量图", clicked=self.show_current_arrow)
+        self.draw_stream_Button = QPushButton("查看各层逐时流速矢量图", clicked=self.show_current_arrow)
 
         layout = QFormLayout()
         layout.addRow(self.output_Button)
@@ -985,6 +1162,10 @@ class Single_Tide_tab(QWidget):
         layout.addRow(self.draw_stream_Button)
 
         self.setLayout(layout)
+
+    def show_current_proper_TXT_click(self):
+        txt = c[self.Point + self.tide_type].output_proper_txt()
+        self.signal.show_current_proper_TXT_signal.emit('TXT', self.Point + self.tide_type, txt)
 
     def show_current_arrow(self):
         fig = c[self.Point + self.tide_type].display()

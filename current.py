@@ -26,6 +26,10 @@ dir_in_360 = lambda d: dir_in_360b(d) if (dir_in_360b(d) > 0 and (dir_in_360b(d)
 str_from_datatime64 = lambda t: str(t)[:-31][-19:].replace('T', ' ')
 str_from_float = lambda t, n=2: str(round(t, n))
 
+str_from_df = lambda item: item.values[0]
+num_from_df = lambda item: str(round(item.values[0], 2))
+
+
 def aoe(fun, v_es, v_ns):
     vs = []
     for i, j in zip(v_es, v_ns):
@@ -379,7 +383,9 @@ class Single_Tide_Point(One_Current_Point):
         One_Current_Point.__init__(self, point, angle, ang, zhang_or_luo, cengshu)
         self.tide_type = tide_type
         self.filename = filename
-        data = pandas.read_csv(filename)
+
+    def preprocess(self):
+        data = pandas.read_csv(self.filename)
         self.cengs = []
         if self.cengshu == 6:
             self.cengs.append(data[['time', 'v', 'd']])
@@ -444,7 +450,41 @@ class Single_Tide_Point(One_Current_Point):
         statistics['Point'] = self.point
         statistics['潮型'] = self.tide_type
         statistics['来源文件'] = self.filename
-        return statistics
+        self.out_data = statistics
+        return self.out_data
+
+    def out(self):
+        try:
+            try:
+                return self.out_data
+            except:
+                self.preprocess()
+                return self.out_data
+        except:
+            self.output_all()
+            return self.out_data
+
+    def out_ave_str_method(self):
+        try:
+            return self.out_ave_str
+        except:
+            self.out_ave_str_generate()
+            return self.out_ave_str
+
+    def out_txt_p(slef, row):
+        return str_from_df(row['Point']) + '观测点在' + str_from_df(row['潮型']) + '时'
+
+    def out_ave_str_generate(self):
+        self.out_ave_str = ''
+
+        def out_ave_txt_c(row):
+            return str_from_df(row['层数']) + '的平均流速为' + num_from_df(row['平均流速']) + 'cm/s,平均流向为' + num_from_df(
+                row['平均流向']) + '°,'
+
+        for _, p in self.out().groupby('Point'):
+            self.out_ave_str += self.out_txt_p(p[0:1])
+            for _, c in p.groupby('层数'):
+                self.out_ave_str += out_ave_txt_c(c)
 
     def change_one_dir_values(self, timeof=1, parameter=0.8):
         changed = []
@@ -511,12 +551,13 @@ class Single_Tide_Point(One_Current_Point):
         ax.set_xlim(0, len(data))
         ax.set_ylim(0, len(self.ceng_processed) + 1)
         ax.set_xlabel('时间', fontsize=20)
+        ax.yaxis.grid(True)
         plt.yticks(range(8), ['', '底层', '0.8H', '0.6H', '0.4H', '0.2H', '表层', '垂线平均'], fontsize=20)
         plt.title(self.point + self.tide_type, fontsize=25)
         return fig
 
-    def output_txt(self):
-        out = self.output_all()
+    def output_proper_txt(self):
+        return self.output_all().to_string()
 
 
 class time_v_d(object):
@@ -607,6 +648,7 @@ def add_convert_row_to_tvd_and_timeof(time_v_d, angle):
     return time_v_d
 
 c1  = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv", point = 'C1', tide_type='大潮', angle=275)
+
 r"""
 
 c1.location(x = 7.5596,y = 6.0510)
@@ -628,12 +670,12 @@ c5_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C5_x.csv",poi
 c6 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C6_d.csv",point = 'C6',tide_type='大潮',angle=270)
 c6_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C6_x.csv",point = 'C6',tide_type='小潮',angle=270)
 print('*'*10)
-
-x = c1.output_all()
 a = [c1_x,c2,c2_x,c3,c3_x,c4,c4_x,c5,c5_x,c6,c6_x]
+x = []
+
 for i in a :
-    x2 = i.output_all()
-    x = x.append(x2,ignore_index=True)
+    x2 = i.out()
+    x = x.append(x2)
 
 
 #max_table = pandas.pivot_table(x,values = ['最大流速对应方向','最大流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
@@ -659,7 +701,6 @@ def draw_dxf(multi_point, parameter, filename):
     for i in multi_point:
         i.draw_dxf(drawing=drawing)
     return drawing
-
 
 print('OK')
 r"""
