@@ -54,6 +54,7 @@ class Tide(object):
         self.sites = xlrd.open_workbook(filename=filename).sheet_names()
         for i in self.sites:
             self.data[i] = pandas.read_excel(self.filename, sheetname=i)
+            self.data[i] = self.data[i][['time', 'tide']]
         if only_first_sheet:
             self.sites = self.sites[:1]
 
@@ -61,11 +62,12 @@ class Tide(object):
         if site:
             df = self.data[site]
             out = {}
-            h = df[df.if_max == True]
-            l = df[df.if_min == True]
+            h = df[df['if_max'] == True]
+            l = df[df['if_min'] == True]
             dif = df['diff'].dropna()
             r_t = df.raising_time.dropna().values.mean()
             e_t = df.ebb_time.dropna().values.mean()
+            out.update({'mean': df.tide_init.mean()})
             out.update({'h_max': h.tide_init.values.max()})
             out.update({'h_mean': h.tide_init.values.mean()})
             out.update({'l_min': l.tide_init.values.min()})
@@ -85,7 +87,7 @@ class Tide(object):
         num_txt = lambda num: str(round(num, 2))
         s = ''
         unit = '米' if (tide_out['dif_max'] < 10) else '厘米'
-        s += '潮位观测站' + site + '的平均潮位为' + num_txt(tide_out['h_mean']) + unit
+        s += '潮位观测站' + site + '的平均潮位为' + num_txt(tide_out['mean']) + unit
         s += ',平均高潮位为' + num_txt(tide_out['h_mean']) + unit + ',高潮位最高为' + num_txt(tide_out['h_max']) + unit
         s += ',平均低潮位为' + num_txt(tide_out['l_mean']) + unit + ',低潮位最低为' + num_txt(tide_out['l_min']) + unit
         s += ',平均潮差为' + num_txt(tide_out['dif_mean']) + unit + ',最大潮差为' + num_txt(tide_out['dif_max']) + unit
@@ -111,7 +113,7 @@ class Tide(object):
         t = []
         if isinstance(temp_data.time[1], pandas.tslib.Timestamp) or isinstance(temp_data.time[1],
                                                                                datetime.datetime):
-            t = temp_data.time
+            t = temp_data.time.dt.round('1min')
         else:
             for x in temp_data.time:
                 t.append(dateutil.parser.parse(x))
@@ -527,8 +529,9 @@ class Process_Tide(Tide):
                 if time_start and time_end:
                     time_start = pandas.Timestamp(time_start)
                     time_end = pandas.Timestamp(time_end)
-                    mon = mon.loc[mon.format_time <= time_end]
+                    mon = mon.loc[mon.format_time < time_end]
                     mon = mon.loc[mon.format_time >= time_start]
+                o_clock = mon.loc[mon.groupby(mon.index.minute == 0).groups[True], ['tide']]
 
                 row1 = count * 42
                 count = count + 1  # 第几个月
@@ -539,7 +542,7 @@ class Process_Tide(Tide):
                     sheet.set_row(r, height=20)
                 for r in range(row1 + 3, row1 + 41):
                     sheet.set_row(r, height=14.25)
-                o_clock = mon.loc[mon.groupby(mon.index.minute == 0).groups[True], ['tide']]
+
                 ######补全星号
                 if len(x.month[site]) != 1:
                     for ii in range(row1 + 6, row1 + 6 + o_clock.index[1].daysinmonth):
@@ -581,8 +584,8 @@ class Process_Tide(Tide):
                     t.append(h)  # 当天的
                     o_clock['day'] = o_clock.index.day
                     gg = o_clock['tide'].groupby(o_clock.day)
-                    mm = gg.mean()
-                    ss = gg.sum()
+                    mm = round(gg.mean(), 1)
+                    ss = round(gg.sum(), 1)
 
                     if len(x.month[site]) != 1:
                         sheet.write(row1 + 5 + i.day, 25, ss.get(i.day) * alpha, format_num)
@@ -622,7 +625,7 @@ class Process_Tide(Tide):
                     else:
                         sheet.write(row1 + 5 + hanghanghang_1, 28 + move1, high.loc[i, ['tide']] * alpha, format_num)
 
-                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(round(alpha* high.tide.max())),
+                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(round(alpha * high.tide.max(), 1)),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 2,
@@ -662,7 +665,7 @@ class Process_Tide(Tide):
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num_r)
                     else:
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num)
-                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(round(alpha * low.tide.min())),
+                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(round(alpha * low.tide.min(), 1)),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 9,
@@ -686,11 +689,11 @@ class Process_Tide(Tide):
                                   format_cn_a_left2)
                 ###############################################################################
                 sheet.write(row1 + 6 + hangshu, 15,
-                            '月 平 均 潮 差 = ' + str(round(alpha * numpy.mean(mon['diff'].dropna().values))),
+                            '月 平 均 潮 差 = ' + str(round(alpha * numpy.mean(mon['diff'].dropna().values), 1)),
                             format_cn_a_left)
-                sheet.write(row1 + 7 + hangshu, 15, '月 最 大 潮 差 = ' + str(round(mon['diff'].max() * alpha)),
+                sheet.write(row1 + 7 + hangshu, 15, '月 最 大 潮 差 = ' + str(round(mon['diff'].max() * alpha, 1)),
                             format_cn_a_left)
-                sheet.write(row1 + 8 + hangshu, 15, '月 最 小 潮 差 = ' + str(round(mon['diff'].min() * alpha)),
+                sheet.write(row1 + 8 + hangshu, 15, '月 最 小 潮 差 = ' + str(round(mon['diff'].min() * alpha, 1)),
                             format_cn_a_left1)
                 #############################################################################
                 r_1 = row1 + 7
@@ -808,14 +811,16 @@ class Process_Tide(Tide):
 
 
 if __name__ == "__main__":
-    filename = r"E:\★★★★★项目★★★★★\杂\嵊泗20170809潮位（十分钟）.xls"
+    filename = r"E:\★★★★★项目★★★★★\★★★★★坦桑尼亚2017★★★★★\坦桑尼亚水文测验临时成果\程序阅读文件.xlsx"
     t = Process_Tide(filename)
-    t.preprocess('嵊泗', 30)
+    t.preprocess('T1', 50)
     t.output(r"C:\Users\Feiger\Desktop\2.xlsx", reference_system='当地基面')
     # t.out_put_mid_data("E:\★★★★★项目★★★★★\杂\嵊泗中间结果.xlsx", '嵊泗')
 
     # t.output(r"E:\★★★★★项目★★★★★\杂\嵊泗报表222.xlsx",reference_system='当地基面')
-    """t.display()
+    # t.display()
+    t.tide_statics()
+    """
         with open(r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\中间数据2012-3.html", 'w') as f:
             for _,v in t.html.items():
                 f.write(v)
