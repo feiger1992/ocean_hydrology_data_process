@@ -129,8 +129,11 @@ class Current_pre_process(object):
                 sheet_name = f.sheet_names[0]
             self.name = sheet_name
             self.df = f.parse(sheetname=sheet_name)
+
         self.df = self.df.replace(to_replace=3276.7, value=np.nan)
         self.df = self.df.drop([i for i in self.df if 'Unnamed' in i], axis=1)
+
+        # self.df = self.df.reset(range(len(self.df)))
 
         if 't' in self.df.columns:
             if 'time' in self.df.columns:
@@ -147,21 +150,35 @@ class Current_pre_process(object):
             if not (d_i and v_i):
                 raise ValueError('文件中没有流速流向数据')
 
-            self.d = self.df[d_i]
-            self.v = self.df[v_i]
+            self.d = self.df[d_i].apply(self.convert_num, axis=1)
+            self.v = self.df[v_i].apply(self.convert_num, axis=1)
 
             self.l = self.get_less_index(self.d, self.v)
+            if -1 in self.l:
+                raise ValueError(str(self.t[self.l.index(-1)]) + '首层为空值')
             self.e, self.n = self.convert_to_e_n()
+
 
         else:
             e_i = [e for e in self.df.columns if 'e' in e]
             n_i = [n for n in self.df.columns if 'n' in n]
             if not (e_i and n_i):
                 raise ValueError('文件中缺少分向流速数据')
-            self.n = self.df[n_i]
-            self.e = self.df[e_i]
+            self.n = self.df[n_i].apply(self.convert_num, axis=1)
+            self.e = self.df[e_i].apply(self.convert_num, axis=1)
+
             self.l = self.get_less_index(self.n, self.e)
+
+            if -1 in self.l:
+                raise ValueError(str(self.t[self.l.index(-1)]) + '首层为空值')
+
             self.v, self.d = self.convert_to_v_d()
+
+    def convert_num(self, series):
+        try:
+            return pandas.to_numeric(series, errors=pandas.NaT)
+        except:
+            return series
 
     def convert_to_e_n(self):
         e = pandas.DataFrame()
@@ -185,10 +202,15 @@ class Current_pre_process(object):
                 v['v' + str(i)] = aoe(velocity, self.e['e' + str(i)], self.n['n' + str(i)])
                 d['n' + str(i)] = aoe(direction, self.e['e' + str(i)], self.n['n' + str(i)])
             except:
-                v['e' + str(i)] = velocity(self.e['e' + str(i)].convert_objects(convert_numeric=True),
-                                           self.n['n' + str(i)].convert_objects(convert_numeric=True))
-                d['e' + str(i)] = direction(self.e['e' + str(i)].convert_objects(convert_numeric=True),
-                                            self.n['n' + str(i)].convert_objects(convert_numeric=True))
+                # self.e.loc['e' + str(i)]= self.e['e' + str(i)].convert_objects(convert_numeric=True)
+                # self.n.loc['n' + str(i)]=  self.n['n' + str(i)].convert_objects(convert_numeric=True)
+                self.e.loc['e' + str(i)] = pandas.to_numeric(self.e['e' + str(i)], errors=pandas.NaT)
+                self.e.loc['n' + str(i)] = pandas.to_numeric(self.e['n' + str(i)], errors=pandas.NaT)
+                v['v' + str(i)] = aoe(velocity, self.e['e' + str(i)], self.n['n' + str(i)])
+                d['n' + str(i)] = aoe(direction, self.e['e' + str(i)], self.n['n' + str(i)])
+                # v['e' + str(i)] = aoe(velocity,self.e['e' + str(i)].convert_objects(convert_numeric=True),self.n['n' + str(i)].convert_objects(convert_numeric=True))
+                # d['e' + str(i)] = direction(self.e['e' + str(i)].convert_objects(convert_numeric=True), self.n['n' + str(i)].convert_objects(convert_numeric=True))
+                #d['e' + str(i)] = aoe(direction, self.e['e' + str(i)].convert_objects(convert_numeric=True),self.n['n' + str(i)].convert_objects(convert_numeric=True))
         return v, d
 
     def convert_to_EN_file(self, outfile):
@@ -209,6 +231,7 @@ class Current_pre_process(object):
     def get_less_index(slef, df_1, df_2):
         def find_NaN_index(df):
             l = []
+            df = df.reindex_axis(sorted(df.columns, key=lambda x: int(x[1:])), axis=1)
             for i in range(len(df)):
                 tt = df.iloc[i].convert_objects(convert_numeric=True)
                 s = list(tt.apply(np.isnan))
@@ -234,14 +257,37 @@ class Current_pre_process(object):
         depth = first_bin + bin * (zongcengshu + 1)
         top_e = self.e['e1'][t] * top_ratio
         top_n = self.n['n1'][t] * top_ratio
-        button_e = self.e['e' + str(zongcengshu)][t] * button_ratio
-        button_n = self.n['n' + str(zongcengshu)][t] * button_ratio
-        h_8 = depth * 0.8 - first_bin
-        h_2 = depth * 0.2 - first_bin
-        h_4 = depth * 0.4 - first_bin
-        h_6 = depth * 0.6 - first_bin
+        button_e = self.e['e' + str(zongcengshu + 1)][t] * button_ratio
+        button_n = self.n['n' + str(zongcengshu + 1)][t] * button_ratio
+
+        scatter = np.linspace(first_bin + bin / 2, depth - bin / 2, zongcengshu + 1)
+
+        cal_h = lambda ref: depth * ref if depth * ref > first_bin + 0.5 * bin else 0
+
+        h_8 = cal_h(0.8)
+        h_6 = cal_h(0.6)
+        h_4 = cal_h(0.4)
+        h_2 = cal_h(0.2)
 
         def quan_zhong(x):
+            quan_zhong_dep = lambda bin, x, up_depth, down_depth: [(x - up_depth) / bin,
+                                                                   (down_depth - x) / bin]  # 返回的按顺序分别是到下层的权重以及到上层的权重
+            if x != 0 and zongcengshu != 0:
+                scatter_add_x = sorted(np.append(scatter, x))
+                up_x_index = scatter_add_x.index(x) - 1
+                down_x_index = scatter_add_x.index(x)
+                up_depth = scatter[up_x_index]
+                down_depth = scatter[down_x_index]
+                x_down, x_up = quan_zhong_dep(bin, x, up_depth, down_depth)
+                return up_x_index + 1, down_x_index + 1, x_up, x_down
+            else:
+                return 1, 1, 0.5, 0.5
+
+        """def quan_zhong(x,up_depth,down_depth):
+            x_u = (x - up_depth)/bin
+            x_d = (x - down_depth)/bin
+
+
             x = round(x, 3)
             x2 = round(x)
             if x < 1:
@@ -249,7 +295,7 @@ class Current_pre_process(object):
             if x2 > x:
                 return x2 - 1, x2, x - (x2 - 1), x2 - x
             else:
-                return x2, x2 + 1, x - x2, x2 + 1 - x  # 返回的x为第x层，从1算起
+                return x2, x2 + 1, x - x2, x2 + 1 - x  # 返回的x为第x层，从1算起"""
 
         def jia_quan(df_e, df_n, t, i, j, i_r, j_r):
             return df_e['e' + str(i)][t] * i_r + df_e['e' + str(j)][t] * j_r, df_n['n' + str(i)][t] * i_r + \
@@ -341,6 +387,11 @@ class Current_pre_process(object):
 
         emerge.to_csv(outfile, sep=',', index=False, encoding='utf-8')
 
+
+C1 = Current_pre_process(r"E:\★★★★★项目★★★★★\★★★★★坦桑尼亚2017★★★★★\（王工发来）坦桑尼亚水文数据\C1大潮.csv", is_VD=True)
+C1.all_fenceng()
+#C7.save_result(r"E:\★★★★★项目★★★★★\★★★★★吉布提2017★★★★★\2017吉布提\1长期观测\潮流观测\2过程数据\10月\C7\C7原始数据分层.csv")
+
 """
 a = r"E:\★★★★★项目★★★★★\★★★★★双子山油品储运贸易基地陆域形成工程★★★★★\实测数据\小潮\C6sun\C6VD.xlsx"
 b = r"E:\★★★★★项目★★★★★\★★★★★双子山油品储运贸易基地陆域形成工程★★★★★\实测数据\小潮\C6sun\C6NE.csv"
@@ -395,6 +446,7 @@ class Single_Tide_Point(One_Current_Point):
         self.ceng_processed = []
         for i in self.cengs:
             self.ceng_processed.append(time_v_d(i, self.angle, ang=self.ang, zhang_or_luo=self.zhang_or_luo))
+
         self.cal_time_of_ave()
 
     def cal_time_of_ave(self):
@@ -476,15 +528,23 @@ class Single_Tide_Point(One_Current_Point):
 
     def out_ave_str_generate(self):
         self.out_ave_str = ''
-
+        ceng_list = ['表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层', '垂线平均']
+        r_or_e = ['涨潮','落潮']
         def out_ave_txt_c(row):
-            return str_from_df(row['层数']) + '的平均流速为' + num_from_df(row['平均流速']) + 'cm/s,平均流向为' + num_from_df(
-                row['平均流向']) + '°,'
+            return str_from_df(row['层数']) + '的平均流速为' + num_from_df(row['平均流速']) + 'cm/s（' + num_from_df(
+                row['平均流向']) + '°）,'
 
         for _, p in self.out().groupby('Point'):
             self.out_ave_str += self.out_txt_p(p[0:1])
-            for _, c in p.groupby('层数'):
-                self.out_ave_str += out_ave_txt_c(c)
+            # for _, c in p.groupby('层数'):
+            # self.out_ave_str += out_ave_txt_c(c)
+            for i_e in r_or_e:
+                self.out_ave_str += '在' + i_e + '时,'
+                for ceng in ceng_list:
+                    r = p[(p['层数'] == ceng) & (p['涨落潮'] == i_e)]
+                    self.out_ave_str += out_ave_txt_c(r)
+
+
 
     def change_one_dir_values(self, timeof=1, parameter=0.8):
         changed = []
@@ -647,9 +707,11 @@ def add_convert_row_to_tvd_and_timeof(time_v_d, angle):
     time_v_d['time'] = time_v_d['t']
     return time_v_d
 
-c1  = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv", point = 'C1', tide_type='大潮', angle=275)
 
+# c1  = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv", point = 'C1', tide_type='大潮', angle=275)
+#s = c1.out_ave_str_method()
 r"""
+
 
 c1.location(x = 7.5596,y = 6.0510)
 
@@ -675,14 +737,14 @@ x = []
 
 for i in a :
     x2 = i.out()
-    x = x.append(x2)
-
+    x.append(x2)
+"""
 
 #max_table = pandas.pivot_table(x,values = ['最大流速对应方向','最大流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
 #mean_table = pandas.pivot_table(x,values = ['平均流向','平均流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
 #tt = x.groupby(['Point','潮型','涨落潮'])
 #x = x.set_index(['Point','潮型','涨落潮'])
-"""
+
 r"""for i,j in tt:
     print(i)
     v = j['最大流速'].max()
