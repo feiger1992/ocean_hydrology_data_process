@@ -7,9 +7,11 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QLabel, QVBoxLay
     QTextEdit
 from PyQt5.QtWebKitWidgets import QWebView
 from threading import Thread
+from multiprocessing import pool
 import queue
 import sys, time
 import pandas
+
 
 sys.path.append('~/tide.py')
 sys.path.append('~/current.py')
@@ -554,15 +556,15 @@ class Tide_Site_Tab(QWidget):
     def show_diff_pic(self):
         # plot_thread = Thread(target=t[self.filename].plot_tide_compare,kwargs={'site':self.sitename})
         self.fig = t[self.filename].plot_tide_compare(self.sitename)
-        self.signal.show_diff_signal.emit(t[self.filename].compare_fig)
-        """plot_thread.start()
+        self.signal.show_diff_signal.emit(self.fig)
+        '''plot_thread.start()
         second = 0
         while plot_thread.is_alive():
             sig.msg_to_show.emit('正在生成交互图形,处理用时'+str(round(second,1))+'秒')
             time.sleep(0.1)
-            second += 0.1
+            second += 0.1'''
         sig.msg_to_show.emit(self.sitename+'站图形生成完毕')
-        self.signal.show_diff_signal.emit(t[self.filename].compare_fig)"""
+        #self.signal.show_diff_signal.emit(t[self.filename].compare_fig)
 
     def show_tide_TXT_click(self):
         self.signal.show_tide_TXT_signal.emit(self.filename, self.sitename,
@@ -714,12 +716,16 @@ class Current_Tab(QWidget):
         self.if_vd.setChecked(False)
         self.if_vd.setToolTip("流速为V-D格式时选择此项，为东北分向流速时取消选择")
 
+        self.if_reverse = QCheckBox('沉底式')
+        self.if_reverse.setChecked(False)
+        self.if_reverse.setToolTip('采用沉底式ADCP时选择此项，层数由底层到表层')
+
         self.bed_count = QComboBox()
         self.bed_count.addItem('六层法')
         self.bed_count.addItem('三层法（尚未开发）')
         self.first_bin = QDoubleSpinBox()
         self.first_bin.setValue(0.7)
-        self.first_bin.setToolTip("输入仪器探头在水下的深度，单位为米")
+        self.first_bin.setToolTip("输入仪器探头在水下的深度加上盲区深度，单位为米")
         self.bin_height = QDoubleSpinBox()
         self.bin_height.setValue(1.0)
         self.bin_height.setToolTip('设置单层高度，单位为米')
@@ -736,13 +742,13 @@ class Current_Tab(QWidget):
 
         self.if_save_VD = QCheckBox('保存为格式')
         self.if_save_VD.setChecked(True)
-        self.save_bedded_file = QPushButton('保存结果', clicked=self.save_bedded_file_click)
+        self.save_bedded_file = QPushButton('分层并保存结果', clicked=self.save_bedded_file_click)
 
         r_group_layout.addRow(self.pre_bed)
-        r_group_layout.addRow(self.if_vd)
+        r_group_layout.addRow(self.if_vd, self.if_reverse)
         # r_group_layout.addRow(QLabel("总层数选择"))
         # r_group_layout.addRow(self.bed_count)
-        r_group_layout.addRow("入水深度", self.first_bin)
+        r_group_layout.addRow("入水深度加盲区高度", self.first_bin)
         r_group_layout.addRow("每层高度", self.bin_height)
         r_group_layout.addRow("表层流速比例", self.top_ratio)
         r_group_layout.addRow("底层流速比例", self.button_ratio)
@@ -939,7 +945,8 @@ class Current_Tab(QWidget):
                                                   options=self.options)
         if fileName:
             self.beding_current.all_fenceng(bin=self.bin_height.value(), first_bin=self.first_bin.value(),
-                                            top_ratio=self.top_ratio.value(), button_ratio=self.button_ratio.value())
+                                            top_ratio=self.top_ratio.value(), button_ratio=self.button_ratio.value(),
+                                            reverse=self.if_reverse.isChecked())
             self.beding_current.save_result(outfile=fileName, V_D=self.if_save_VD)
             QMessageBox.information(self, '通知',
                                     "文件转化结束")
