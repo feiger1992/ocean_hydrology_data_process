@@ -13,15 +13,16 @@ plt.rcParams['axes.unicode_minus'] = False
 east = lambda v, d: v * np.sin(d / 180 * np.pi)
 north = lambda v, d: v * np.cos(d / 180 * np.pi)
 velocity = lambda v_e, v_n: np.sqrt(v_e ** 2 + v_n ** 2)
-direction = lambda v_e, v_n: 180 / np.pi * np.arctan2(v_e, v_n) if (v_e > 0)else   180 / np.pi * np.arctan2(v_e,
-                                                                                                            v_n) + 360
+dir_in_360b = lambda d: (d - 360 if d >= 360 else d) if d > 0 else  360 + d
+dir_in_360 = lambda d: dir_in_360b(d) if (dir_in_360b(d) > 0 and (dir_in_360b(d) <= 360)) else dir_in_360b(
+    dir_in_360b(d))
+direction = lambda v_e, v_n: dir_in_360(180 / np.pi * np.arctan2(v_e, v_n)) if (v_e > 0)else   dir_in_360(
+    180 / np.pi * np.arctan2(v_e, v_n) + 360)
 small_diff_dir = lambda d1, d2: (d1 - d2 if d1 - d2 < 180 else d2 + 360 - d1) if d1 > d2 else  (
 d2 - d1 if d2 - d1 < 180 else d1 + 360 - d2)
 is_d1_in_d2_and_d3 = lambda d1, d2, d3: True if (
 small_diff_dir(d1, d3) + small_diff_dir(d1, d2) == small_diff_dir(d2, d3)) else False
-dir_in_360b = lambda d: (d - 360 if d > 360 else d) if d > 0 else  360 + d
-dir_in_360 = lambda d: dir_in_360b(d) if (dir_in_360b(d) > 0 and (dir_in_360b(d) < 360)) else dir_in_360b(
-    dir_in_360b(d))
+
 
 str_from_datatime64 = lambda t: str(t)[:-31][-19:].replace('T', ' ')
 str_from_float = lambda t, n=2: str(round(t, n))
@@ -253,14 +254,40 @@ class Current_pre_process(object):
                 l.append(j)
         return l
 
-    def fen_ceng(self, zongcengshu, t, bin, first_bin, top_ratio, button_ratio):
+    def fen_ceng(self, zongcengshu, t, bin, first_bin, top_ratio, button_ratio, reverse):
         depth = first_bin + bin * (zongcengshu + 1)
-        top_e = self.e['e1'][t] * top_ratio
-        top_n = self.n['n1'][t] * top_ratio
-        button_e = self.e['e' + str(zongcengshu + 1)][t] * button_ratio
-        button_n = self.n['n' + str(zongcengshu + 1)][t] * button_ratio
+        if zongcengshu == 2:  # 只有两层的情况
+            h_6_e = self.e['e1'][t]
+            h_6_n = self.n['n1'][t]
+            button_e = self.e['e' + str(zongcengshu + 1)][t] * button_ratio
+            button_n = self.n['n' + str(zongcengshu + 1)][t] * button_ratio
+            factor = bin * ((depth ** (7 / 6)) - (depth - first_bin - bin / 2) ** (7 / 6)) / first_bin * (
+            (depth - first_bin - bin / 2) ** (7 / 6) - bin / 2)  # 采用幂函数推算，具体见泛际帮助手册中的公式
+            top_e = (h_6_e + button_e / button_ratio) * factor
+            top_n = (h_6_n + button_n / button_ratio) * factor
+            h_2_e, h_2_n, h_4_e, h_4_n, h_8_e, h_8_n = [0] * 6
+            ave_e = (top_e + h_6_e + button_e) / 3
+            ave_n = (top_n + h_6_n + button_n) / 3
+            return top_e, top_n, h_2_e, h_2_n, h_4_e, h_4_n, h_6_e, h_6_n, h_8_e, h_8_n, button_e, button_n, ave_e, ave_n, depth
 
-        scatter = np.linspace(first_bin + bin / 2, depth - bin / 2, zongcengshu + 1)
+        if reverse:
+            if velocity(self.e['e' + str(zongcengshu + 1)][t], self.n['n' + str(zongcengshu + 1)][t]) / velocity(
+                    self.e['e' + str(zongcengshu)][t], self.n['n' + str(zongcengshu)][t]) <= 3:  # 比较前两层流速大小
+                if_first_bin = 0
+            else:
+                if_first_bin = 1
+            top_e = self.e['e' + str(zongcengshu + if_first_bin)][t] * top_ratio  # 第一层流速太大，用第二层
+            top_n = self.n['n' + str(zongcengshu + if_first_bin)][t] * top_ratio
+            button_e = self.e['e1'][t] * button_ratio
+            button_n = self.n['n1'][t] * button_ratio
+            scatter = np.linspace(depth - bin / 2, first_bin + bin / 2, zongcengshu + 1)
+
+        else:
+            top_e = self.e['e1'][t] * top_ratio
+            top_n = self.n['n1'][t] * top_ratio
+            button_e = self.e['e' + str(zongcengshu + 1)][t] * button_ratio
+            button_n = self.n['n' + str(zongcengshu + 1)][t] * button_ratio
+            scatter = np.linspace(first_bin + bin / 2, depth - bin / 2, zongcengshu + 1)
 
         cal_h = lambda ref: depth * ref if depth * ref > first_bin + 0.5 * bin else 0
 
@@ -270,32 +297,29 @@ class Current_pre_process(object):
         h_2 = cal_h(0.2)
 
         def quan_zhong(x):
-            quan_zhong_dep = lambda bin, x, up_depth, down_depth: [(x - up_depth) / bin,
-                                                                   (down_depth - x) / bin]  # 返回的按顺序分别是到下层的权重以及到上层的权重
+            quan_zhong_dep = lambda bin, x, up_depth, down_depth: [abs(x - up_depth) / bin,
+                                                                   abs(down_depth - x) / bin]  # 返回的按顺序分别是到下层的权重以及到上层的权重
             if x != 0 and zongcengshu != 0:
                 scatter_add_x = sorted(np.append(scatter, x))
-                up_x_index = scatter_add_x.index(x) - 1
-                down_x_index = scatter_add_x.index(x)
+
+                if reverse:
+                    scatter_add_x_r = list(reversed(sorted(np.append(scatter, x))))  # 用于计算高度
+                    up_x_index = scatter_add_x_r.index(x) - 1
+                    down_x_index = scatter_add_x_r.index(x)
+                else:
+                    up_x_index = scatter_add_x.index(x) - 1
+                    down_x_index = scatter_add_x.index(x)
                 up_depth = scatter[up_x_index]
                 down_depth = scatter[down_x_index]
+
                 x_down, x_up = quan_zhong_dep(bin, x, up_depth, down_depth)
+                if reverse:  # 计算层数，正序不需要,并且将计算权重翻转
+                    up_x_index = scatter_add_x.index(x) - 1
+                    down_x_index = scatter_add_x.index(x)
+                    x_down, x_up = x_up,x_down
                 return up_x_index + 1, down_x_index + 1, x_up, x_down
             else:
                 return 1, 1, 0.5, 0.5
-
-        """def quan_zhong(x,up_depth,down_depth):
-            x_u = (x - up_depth)/bin
-            x_d = (x - down_depth)/bin
-
-
-            x = round(x, 3)
-            x2 = round(x)
-            if x < 1:
-                return 1, 1, 0.5, 0.5
-            if x2 > x:
-                return x2 - 1, x2, x - (x2 - 1), x2 - x
-            else:
-                return x2, x2 + 1, x - x2, x2 + 1 - x  # 返回的x为第x层，从1算起"""
 
         def jia_quan(df_e, df_n, t, i, j, i_r, j_r):
             return df_e['e' + str(i)][t] * i_r + df_e['e' + str(j)][t] * j_r, df_n['n' + str(i)][t] * i_r + \
@@ -317,7 +341,7 @@ class Current_pre_process(object):
         ave_n = (top_n + 2 * h_2_n + 2 * h_4_n + 2 * h_6_n + 2 * h_8_n + button_n) / 10
         return top_e, top_n, h_2_e, h_2_n, h_4_e, h_4_n, h_6_e, h_6_n, h_8_e, h_8_n, button_e, button_n, ave_e, ave_n, depth
 
-    def all_fenceng(self, bin=1, first_bin=0.7, top_ratio=1.05, button_ratio=0.95):
+    def all_fenceng(self, bin=1, first_bin=0.7, top_ratio=1.05, button_ratio=0.95,reverse = False):
         columns = ['top', 'h_2', 'h_4', 'h_6', 'h_8', 'button', 'ave']
 
         self.ee = pandas.DataFrame(columns=columns)
@@ -327,7 +351,7 @@ class Current_pre_process(object):
         all_depth = []
         for i in self.df.index:
             top_e, top_n, h_2_e, h_2_n, h_4_e, h_4_n, h_6_e, h_6_n, h_8_e, h_8_n, button_e, button_n, ave_e, ave_n, depth = self.fen_ceng(
-                self.l[i], i, bin, first_bin, top_ratio, button_ratio)
+                self.l[i], i, bin, first_bin, top_ratio, button_ratio,reverse)
             e = pandas.DataFrame([[top_e, h_2_e, h_4_e, h_6_e, h_8_n, button_e, ave_e]], columns=columns)
             n = pandas.DataFrame([[top_n, h_2_n, h_4_n, h_6_n, h_8_n, button_n, ave_n]], columns=columns)
             v = pandas.DataFrame([[velocity(top_e, top_n), velocity(h_2_e, h_2_n), velocity(h_4_e, h_4_n),
@@ -388,9 +412,9 @@ class Current_pre_process(object):
         emerge.to_csv(outfile, sep=',', index=False, encoding='utf-8')
 
 
-C1 = Current_pre_process(r"E:\★★★★★项目★★★★★\★★★★★坦桑尼亚2017★★★★★\（王工发来）坦桑尼亚水文数据\C1大潮.csv", is_VD=True)
-C1.all_fenceng()
-#C7.save_result(r"E:\★★★★★项目★★★★★\★★★★★吉布提2017★★★★★\2017吉布提\1长期观测\潮流观测\2过程数据\10月\C7\C7原始数据分层.csv")
+# C7 = Current_pre_process(r"E:\★★★★★项目★★★★★\★★★★★吉布提2017★★★★★\2017吉布提\1长期观测\潮流观测\2过程数据\10月\C7\C7原始数据待分层.csv",is_VD=False)
+# C7.all_fenceng()
+#C7.save_result(r"E:\★★★★★项目★★★★★\★★★★★吉布提2017★★★★★\2017吉布提\1长期观测\潮流观测\2过程数据\10月\C7\C7原始数据分层(11-22结果).csv")
 
 """
 a = r"E:\★★★★★项目★★★★★\★★★★★双子山油品储运贸易基地陆域形成工程★★★★★\实测数据\小潮\C6sun\C6VD.xlsx"
@@ -708,55 +732,9 @@ def add_convert_row_to_tvd_and_timeof(time_v_d, angle):
     return time_v_d
 
 
-# c1  = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_d.csv", point = 'C1', tide_type='大潮', angle=275)
-#s = c1.out_ave_str_method()
-r"""
-
-
-c1.location(x = 7.5596,y = 6.0510)
-
-c1_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C1_x.csv",point = 'C1',tide_type='小潮',angle=275)
-
-c2 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C2_d.csv",point = 'C2',tide_type='大潮',angle=260)
-c2_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C2_x.csv",point = 'C2',tide_type='小潮',angle=260)
-
-c3 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C3_d.csv",point = 'C3',tide_type='大潮',angle=280)
-c3_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C3_x.csv",point = 'C3',tide_type='小潮',angle=280)
-
-c4 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C4_d.csv",point = 'C4',tide_type='大潮',angle=270)
-c4_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C4_x.csv",point = 'C4',tide_type='小潮',angle=270)
-
-c5 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C5_d.csv",point = 'C5',tide_type='大潮',angle=270)
-c5_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C5_x.csv",point = 'C5',tide_type='小潮',angle=270)
-
-c6 = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C6_d.csv",point = 'C6',tide_type='大潮',angle=270)
-c6_x = Single_Tide_Point(r"C:\Users\Feiger\Desktop\双子山潮流\C6_x.csv",point = 'C6',tide_type='小潮',angle=270)
-print('*'*10)
-a = [c1_x,c2,c2_x,c3,c3_x,c4,c4_x,c5,c5_x,c6,c6_x]
-x = []
-
-for i in a :
-    x2 = i.out()
-    x.append(x2)
-"""
-
-#max_table = pandas.pivot_table(x,values = ['最大流速对应方向','最大流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
-#mean_table = pandas.pivot_table(x,values = ['平均流向','平均流速'],index = ['Point','潮型','涨落潮'],columns = ['层数'])
-#tt = x.groupby(['Point','潮型','涨落潮'])
-#x = x.set_index(['Point','潮型','涨落潮'])
-
-r"""for i,j in tt:
-    print(i)
-    v = j['最大流速'].max()
-    print(v)
-    t = j.loc[j['最大流速']==v]['出现时间']
-    d = j.loc[j['最大流速']==v]['最大流速对应方向']
-    ceng = j.loc[j['最大流速']==v]['层数']
-    print('对应时间为'+str(t)+',最大流速对应方向为'+str(d)+',出现在层数'+str(ceng))
-x.to_csv(r"C:\Users\Feiger\Desktop\分析结果.csv",sep=',')
-#c0 = c.cengs[0]
-#tvd = time_v_d(c0,275)"""
-
+# test = Current_pre_process(r"E:\★★★★★项目★★★★★\★★★★★吉布提2017★★★★★\2017吉布提\1长期观测\潮流观测\2过程数据\10月\C3\10月原始vd数据（程序阅读）.csv")
+# test.all_fenceng(reverse=True)
+#test.save_result(r"E:\★★★★★项目★★★★★\★★★★★吉布提2017★★★★★\2017吉布提\1长期观测\潮流观测\2过程数据\10月\C3\10月原始vd数据（程序结果）.csv")
 
 def draw_dxf(multi_point, parameter, filename):
     drawing = dxf.drawing('filename')
@@ -765,20 +743,3 @@ def draw_dxf(multi_point, parameter, filename):
     return drawing
 
 print('OK')
-r"""
-c1_x.location(x = 7.5596,y = 6.5501)
-c2_x.location(x = 4.2524,y = 5.6)
-c2.location(x = 4.2524,y = 5.6)
-c3.location(x = 2.6273,y = 4.801)
-c3_x.location(x = 2.6273,y = 4.801)
-c4.location(x = 5.3865,y = 5.106)
-c4_x.location(x = 5.3865,y = 5.106)
-c5.location(x = 4.3277,y = 3.791)
-c5_x.location(x = 4.3277,y = 3.791)
-c6.location(x = 7.5826,y = 3.8596)
-c6_x.location(x = 7.5826,y = 3.8596)
-
-d,x = [c1,c2,c3,c4,c5,c6],[c1_x,c2_x,c3_x,c4_x,c5_x,c6_x]
-a = draw_dxf(d,parameter=0.05,filename='大潮流速矢量图.dxf')
-a.save()
-"""
