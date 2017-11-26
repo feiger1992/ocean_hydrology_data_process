@@ -7,14 +7,17 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QLabel, QVBoxLay
     QTextEdit
 from PyQt5.QtWebKitWidgets import QWebView
 from threading import Thread
-from multiprocessing import pool
-import queue
+from docx import Document
+from  docx.shared import Pt
+from  docx.oxml.ns import qn
+from docx.shared import RGBColor
+from docx.shared import Inches
 import sys, time
 import pandas
 
-
 sys.path.append('~/tide.py')
 sys.path.append('~/current.py')
+sys.path.append('~/wind_wave.py')
 from tide import Process_Tide
 from current import Single_Tide_Point, Current_pre_process
 
@@ -289,11 +292,11 @@ class TideTab(QWidget):
         tide_d_Group_Layout.addWidget(self.del_data)
 
         self.show_statics = QPushButton('显示各站点统计结果')
-        self.gen_document = QPushButton('生成总报告')
+        self.gen_Tieddocument_button = QPushButton('生成潮位报告', clicked=self.genTideDocument2File)
 
         tide_d2_Group_Layout = QVBoxLayout()
         tide_d2_Group_Layout.addWidget(self.show_statics)
-        tide_d2_Group_Layout.addWidget(self.gen_document)
+        tide_d2_Group_Layout.addWidget(self.gen_Tieddocument_button)
 
         self.tide_d_Group.setLayout(tide_d_Group_Layout)
         self.tide_d2_Group.setLayout(tide_d2_Group_Layout)
@@ -384,6 +387,38 @@ class TideTab(QWidget):
     def errorMessage(self, Wrong_msg):
         self.errorMessageDialog.showMessage(Wrong_msg)
         self.errorLabel.setText("确定")
+
+    def genTideDocument2File(self):
+        self.tideDocumentName, _ = QFileDialog.getSaveFileName(self, "保存潮位报告文件", "", "Word 文档(*.docx)",
+                                                               options=QFileDialog.Options())
+        if self.tideDocumentName:
+            self.genTideDocument(self.tideDocumentName)
+
+    def genTideDocument(self, filename):
+        document = Document()
+        document.styles['Normal'].font.name = u'宋体'
+        document.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+        document.styles['Heading 2'].font.name = u'宋体'
+        document.styles['Heading 2']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+        h = document.add_heading('潮位分析')
+        h.style.font.size = Pt(20)
+        h.style.font.name = u'宋体'
+        h.style.font.color.rgb = RGBColor(0, 0, 0)
+        h.style.font.bold = False
+        p = document.add_paragraph('')
+        tideStaticsContent = []
+        for i, j in t.items():
+            for site in j.sites:
+                tideStaticsContent.append(j.outtxt[site] + '\n')
+        for i in tideStaticsContent:
+            r = p.add_run(i)
+            r.style.font.size = Pt(10)
+            r.style.font.name = u'宋体'
+            r.style.font.bold = False
+
+        document.save(filename)
+
+
 
 
 class Site_Tide_signal_event(QObject):
@@ -883,14 +918,19 @@ class Current_Tab(QWidget):
     def save_max_out(self):
         self.gen_all_current_out()
         self.max_out = pandas.pivot_table(self.all_current_out, values=['最大流速', '最大流速对应方向'],
-                                          index=['Point', '潮型', '涨落潮'], columns=['层数'])
+                                          index=['Point', '潮型', '涨落潮'], columns=['层数']).swaplevel(0, 1,
+                                                                                                  axis=1).reindex_axis(
+            ['垂线平均', '表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层'], axis=1, level=0).reindex_axis(['最大流速', '最大流速对应方向'],
+                                                                                                axis=1, level=1)
         self.max_out = self.max_out  # 改一下层数顺序，下同
         self.save_csv(self.max_out)
 
     def save_mean_out(self):
         self.gen_all_current_out()
         self.mean_out = pandas.pivot_table(self.all_current_out, values=['平均流速', '平均流向'], index=['Point', '潮型', '涨落潮'],
-                                           columns=['层数'])
+                                           columns=['层数']).swaplevel(0, 1, axis=1).reindex_axis(
+            ['垂线平均', '表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层'], axis=1, level=0).reindex_axis(['平均流速', '平均流向'],
+                                                                                                axis=1, level=1)
         self.mean_out = self.mean_out  # 改一下层数顺序，下同
         self.save_csv(self.mean_out)
 
@@ -1012,7 +1052,7 @@ class Wind_Tab(QWidget):
         self.layout_element()
 
     def layout_element(self):
-        self.load_file = QPushButton('载入测风数据')
+        self.load_file = QPushButton('载入测风数据', clicked=self.preprocess_wind)
         self.load_file.setFixedHeight(50)
         self.statics = QPushButton('测风数据统计分析')
         self.statics.setFixedHeight(50)
@@ -1030,7 +1070,11 @@ class Wind_Tab(QWidget):
 
         self.setLayout(mainLayout)
 
-
+    def preprocess_wind(self):
+        toCompileFilenames = QFileDialog.getOpenFileNames(self, '原始气象数据', "", "DAT文件（*.dat)",
+                                                          options=QFileDialog.Options())
+        toSaveFilenames = QFileDialog.getSaveFileName(self, '转化后的气象数据","","csv文档(*.csv)', options=QFileDialog.Options())
+        # process_file(toCompileFilenames,toSaveFilenames)
 class Wave_tab(QWidget):
     def __init__(self, parent=None):
         super(Wave_tab, self).__init__(parent)
@@ -1121,10 +1165,14 @@ class Point_Tab(QWidget):
                                       cengshu=self.cengshu)
                 self.tides_control.update({tide_type: tab})
                 self.tabs.addTab(tab, tide_type)
+                self.tabs.setToolTip('源文件为' + fileName)
                 sig.load_current_file_done.emit(self.point, tide_type)
                 sig.msg_to_show.emit(self.point + '站' + tide_type + '数据文件载入结束，请继续操作')
 
             return generate_tab
+        else:
+            x = lambda xx: print(xx)
+            return x
 
     def clear_file(self):
         self.tides_control.clear()
