@@ -1,35 +1,34 @@
-from PyQt5.QtCore import QDir, Qt
-from PyQt5.QtCore import QModelIndex, Qt, QDate, QUrl, pyqtSignal, QObject
-from PyQt5.QtGui import QStandardItemModel, QValidator, QDoubleValidator, QPixmap
+from PyQt5.QtCore import pyqtSignal, QObject,QThread
+from PyQt5.QtGui import QDoubleValidator
 from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QLabel, QVBoxLayout, QFormLayout, QLineEdit, QSpinBox, \
-    QTableView, QFileDialog, QTextBrowser, QLayout, QGroupBox, QHBoxLayout, QTabWidget, QPushButton, QWidget, QCheckBox, \
-    QMessageBox, QDialog, QDateTimeEdit, QComboBox, QDialogButtonBox, QErrorMessage, QDoubleSpinBox, QInputDialog, \
-    QTextEdit
-from PyQt5.QtWebKitWidgets import QWebView
+     QFileDialog, QTextBrowser, QGroupBox, QHBoxLayout, QTabWidget, QPushButton, QWidget, QCheckBox, \
+    QMessageBox, QDialog, QDateTimeEdit, QComboBox,  QErrorMessage, QDoubleSpinBox, QInputDialog, \
+    QTextEdit,QTableWidget,QTableWidgetItem
+
 from threading import Thread
-from docx import Document
+from  docx import Document
 from  docx.shared import Pt
 from  docx.oxml.ns import qn
 from docx.shared import RGBColor
-from docx.shared import Inches
 import sys, time
 import pandas
 
-sys.path.append('~/tide.py')
-sys.path.append('~/current.py')
-sys.path.append('~/wind_wave.py')
-from tide import Process_Tide
-from current import Single_Tide_Point, Current_pre_process
+
+# 从__main__执行时使用以下导入
+from Metocean.tide import Process_Tide
+from Metocean.current import Single_Tide_Point, Current_pre_process,Read_Report
+
+# 从本文件执行时使用以下导入
+
+#
+
+from dxfwrite import DXFEngine as dxf
 
 import numpy as np
 import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigation
 
-##############
-import matplotlib.pyplot as plt
-
-np.random.seed(19680801)
-data = np.random.randn(2, 100)
 
 dir_of_file = lambda filename: filename.replace(list(filename.split(sep='\\'))[-1], '')
 str_from_df = lambda item: item.values[0]
@@ -37,6 +36,7 @@ num_from_df = lambda item: str(round(item.values[0], 2))
 
 
 # 通知栏         QMessageBox.information(self,'通知标题',"内容")
+
 class M_window(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -48,8 +48,21 @@ class M_window(QMainWindow):
 
     def show_pic(self, fig):
 
-        self.canvas = FigureCanvas(fig)
+        self.diag = QWidget()
+        canvas = FigureCanvas(fig)
+        canvas.setParent(self.diag)
+        self.mpl_toolbar = Navigation(canvas, self.diag)
+
+        vbox = QVBoxLayout()
+        vbox.addWidget(self.mpl_toolbar)
+        vbox.addWidget(canvas)
+        self.diag.setLayout(vbox)
+
         # self.shower.addTab(self.canvas,'HAHAHA')
+        self.win = QMainWindow()
+        self.win.setCentralWidget(self.diag)
+        self.win.show()
+
 
     def initUI(self):
 
@@ -195,12 +208,16 @@ class M_window(QMainWindow):
 
     def display(self, category, title, content, tip=None):
         if category == 'HTML':
-            self.show_content.update({title + '(web)': QWebView()})
-            self.shower.addTab(self.show_content[title + '(web)'], title + '(web)')
-            self.show_content[title + '(web)'].setHtml(content)
-            self.shower.setCurrentWidget(self.show_content[title + '(web)'])
-            if tip:
-                self.shower.setTabToolTip(self.shower.count() - 1, tip)
+            #Qweb = QWebEngineView()
+            #Qweb.setHtml(content)
+            #Qweb.show()
+            #self.show_content.update({title + '(web)': Qweb})
+            #self.shower.addTab(self.show_content[title + '(web)'], title + '(web)')
+
+            #self.shower.setCurrentWidget(self.show_content[title + '(web)'])
+            #if tip:
+                #self.shower.setTabToolTip(self.shower.count() - 1, tip)
+            pass
         if category == 'TXT':
             self.show_content.update({title: QTextEdit()})
             self.shower.addTab(self.show_content[title], title)
@@ -440,6 +457,7 @@ class All_Current_signal_event(QObject):
     show_all_out_signal = pyqtSignal(str, str, str)
     show_max_out_signal = pyqtSignal(str, str, str)
     show_mean_out_signal = pyqtSignal(str, str, str)
+    import_report_signal = pyqtSignal(Read_Report)
 
 
 class All_Signal_event(QObject):
@@ -775,6 +793,16 @@ class Current_Tab(QWidget):
         self.button_ratio.setRange(0.9, 1)
         self.button_ratio.setSingleStep(0.01)
 
+        self.mag_declination = QDoubleSpinBox()
+        self.mag_declination.setRange(-180, 180)
+        self.mag_declination.setValue(1.91)#吉布提
+        #self.mag_declination.setValue(-5.80)
+        #self.mag_declination.setValue(-5.81)#东海舟山
+
+        self.mag_declination.setSingleStep(0.01)
+        self.mag_declination.setToolTip('磁偏角向东为正向西为负，默认值1.91为吉布提对应磁偏角')
+
+
         self.if_save_VD = QCheckBox('保存为格式')
         self.if_save_VD.setChecked(True)
         self.save_bedded_file = QPushButton('分层并保存结果', clicked=self.save_bedded_file_click)
@@ -787,6 +815,7 @@ class Current_Tab(QWidget):
         r_group_layout.addRow("每层高度", self.bin_height)
         r_group_layout.addRow("表层流速比例", self.top_ratio)
         r_group_layout.addRow("底层流速比例", self.button_ratio)
+        r_group_layout.addRow("磁偏角", self.mag_declination)
         r_group_layout.addRow(self.save_bedded_file)
         r_group_layout.addRow(self.VD2EN)
         r_group_layout.addRow(self.EN2VD)
@@ -803,6 +832,9 @@ class Current_Tab(QWidget):
         self.bed_Group = QGroupBox("文件分层")
 
         self.del_data = QPushButton("删除当前潮流数据", clicked=self.del_all_data)
+        #self.save_imported_file_button = QPushButton("保存载入数据",clicked = self.save_imported_file)
+        #self.import_files_button = QPushButton("保存载入数据", clicked=self.import_files)
+
         self.VD2EN = QPushButton('合成流速转为分向流速', clicked=self.vd_to_en)
         self.EN2VD = QPushButton('分向流速转为合成流速', clicked=self.ne_to_vd)
 
@@ -818,25 +850,38 @@ class Current_Tab(QWidget):
         self.ceng_select = QComboBox()
         self.ceng_select.addItem('六点法')
         self.ceng_select.addItem('三点法')
-        self.save_Point_and_Tidetype_count = QPushButton('确认测点、潮型总数', clicked=self.confirm_point)
+        self.save_Point_and_Tidetype_count = QPushButton('确认测点、潮型', clicked=self.confirm_point)
+        self.import_from_report = QPushButton('从潮流报表导入',clicked = self.import_from_report_click)
         self.change_Point_name = QLineEdit()
         self.change_Point_name.setMaximumHeight(15)
+
+
+
         self.show_all_out_Button = QPushButton("查看所有测流结果", clicked=self.show_all_out)
         self.save_all_out_Button = QPushButton('保存', clicked=self.save_all_out)
-        self.save_max_out_Button = QPushButton("汇总流速最大值结果", clicked=self.save_max_out)
-        self.save_mean_out_Button = QPushButton("汇总流速平均值结果", clicked=self.save_mean_out)
+        self.save_max_out_Button = QPushButton("汇总流速最大值", clicked=self.save_max_out)
+        self.save_mean_out_Button = QPushButton("汇总流速平均值", clicked=self.save_mean_out)
+        self.draw_current_cad_Button = QPushButton("绘制流速矢量图",clicked= self.draw_current_cad)
+        self.gen_all_duration_Button = QPushButton("查看涨落潮历时",clicked = self.gen_all_duration_click)
+        self.draw_cengshu = QComboBox()
+        self.draw_cengshu.addItems(["垂线平均","表层","0.2H","0.4H","0.6H","0.8H","底层"])
+        self.cad_parameter = QSpinBox()
+        self.cad_parameter.setValue(10000)
+
+
+
 
         l_group_layout = QFormLayout()
         l_group_layout.addRow("选择潮流测点数量", self.Point_count)
         l_group_layout.addRow("选择测流潮型数", self.all_Tide_type)
         l_group_layout.addRow("选择垂线分层数", self.ceng_select)
-        l_group_layout.addRow(self.save_Point_and_Tidetype_count)
+        l_group_layout.addRow(self.save_Point_and_Tidetype_count,self.import_from_report)
         l_group_layout.addRow(QLabel("编辑测点名称"))
         l_group_layout.addRow(self.change_Point_name)
-        l_group_layout.addRow(self.save_mean_out_Button)
-        l_group_layout.addRow(self.save_max_out_Button)
+        l_group_layout.addRow(self.save_mean_out_Button,self.save_max_out_Button)
         l_group_layout.addRow(self.show_all_out_Button, self.save_all_out_Button)
-
+        l_group_layout.addRow(self.draw_current_cad_Button,self.draw_cengshu)
+        l_group_layout.addRow("选择绘图比例",self.cad_parameter)
         l_group_layout.addRow(self.del_data)
 
         self.current_l_Group.setLayout(l_group_layout)
@@ -864,14 +909,22 @@ class Current_Tab(QWidget):
             if len(c) != self.Point_count.value() * len(self.Tide_types) or not c:
                 QMessageBox.information(self, '通知',
                                         "请载入所有点位对应数据后再点击")
+
+
             elif not self.list_of_all_current_out:
                 for _, j in c.items():
                     self.list_of_all_current_out.append(j.output_all())
-            self.all_current_out = pandas.concat(self.list_of_all_current_out)
+                self.all_current_out = pandas.concat(self.list_of_all_current_out)
 
         except:
             QMessageBox.information(self, '通知',
                                     "请载入所有点位对应数据后再点击")
+
+    def gen_all_duration_out(self):
+        self.gen_all_current_out()
+        self.dic_duration = {}
+        for i,j in c.items():
+            self.dic_duration.update({i:j.out_times()})
 
     def ave_out(self):
         def str_type(point_type_re):
@@ -894,14 +947,21 @@ class Current_Tab(QWidget):
         except:
             self.gen_all_current_out()
             self.ave_out()
+        self.gen_all_current_out()
+
+    def gen_all_duration_click(self):
+        self.sig.show_all_out_signal.emit('TXT','涨落潮历时汇总',pandas.DataFrame(self.dic_duration).to_string())
 
     def save_csv(self, df):
         options = QFileDialog.Options()
-        filename, _ = QFileDialog.getSaveFileName(self, "保存所有点位特征值文件", '', "csv文档 (*.csv)",
+        filename, _ = QFileDialog.getSaveFileName(self, "保存所有点位特征值文件", '', "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)",
                                                   options=options)
         if filename:
             self.filename = filename
-            df.to_csv(filename)
+            if "csv" in filename:
+                df.to_csv(filename)
+            else:
+                df.to_excel(filename)
 
     def show_all_out(self):
         self.gen_all_current_out()
@@ -917,22 +977,29 @@ class Current_Tab(QWidget):
 
     def save_max_out(self):
         self.gen_all_current_out()
+        self.all_current_out['最大流速对应方向'] = pandas.to_numeric(self.all_current_out['最大流速对应方向'])
+        self.all_current_out['最大流速'] = pandas.to_numeric(self.all_current_out['最大流速'])
         self.max_out = pandas.pivot_table(self.all_current_out, values=['最大流速', '最大流速对应方向'],
                                           index=['Point', '潮型', '涨落潮'], columns=['层数']).swaplevel(0, 1,
-                                                                                                  axis=1).reindex_axis(
-            ['垂线平均', '表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层'], axis=1, level=0).reindex_axis(['最大流速', '最大流速对应方向'],
-                                                                                                axis=1, level=1)
+                                                                                                  axis=1).reindex(
+            ['垂线平均', '表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层'], axis=1, level=0).reindex(['最大流速', '最大流速对应方向'],
+                                                                                                axis=1, level=1).reindex(['大潮','中潮','小潮'],axis = 0,level=1)
         self.max_out = self.max_out  # 改一下层数顺序，下同
         self.save_csv(self.max_out)
+        sig.msg_to_show.emit('流速最大值汇总结束')
 
     def save_mean_out(self):
         self.gen_all_current_out()
+        self.all_current_out['平均流速'] = pandas.to_numeric(self.all_current_out['平均流速'])
+        self.all_current_out['平均流向'] = pandas.to_numeric(self.all_current_out['平均流向'])
         self.mean_out = pandas.pivot_table(self.all_current_out, values=['平均流速', '平均流向'], index=['Point', '潮型', '涨落潮'],
-                                           columns=['层数']).swaplevel(0, 1, axis=1).reindex_axis(
-            ['垂线平均', '表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层'], axis=1, level=0).reindex_axis(['平均流速', '平均流向'],
-                                                                                                axis=1, level=1)
+                                           columns=['层数']).swaplevel(0, 1, axis=1).reindex(
+            ['垂线平均', '表层', '0.2H', '0.4H', '0.6H', '0.8H', '底层'], axis=1, level=0).reindex(['平均流速', '平均流向'],
+                                                                                                axis=1, level=1).reindex(['大潮','中潮','小潮'],axis = 0,level=1)
+
         self.mean_out = self.mean_out  # 改一下层数顺序，下同
         self.save_csv(self.mean_out)
+        sig.msg_to_show.emit('流速平均值汇总结束')
 
     def welcome_init_tab(self):
         self.init_tab = Welcome_Tab("请载入单点潮流数据文件")
@@ -941,8 +1008,7 @@ class Current_Tab(QWidget):
         # self.sites_tab.addTab(Point_Tab("POINT1", tide_types=['大潮', '中潮', '小潮'], cengshu=6), 'POINT1')
         self.init_tab.load_file_button.clicked.connect(self.open_current_file)
 
-    def confirm_point(self):
-        point_names = self.change_Point_name.text()
+    def confirm_point(self,format_report = False):
         if self.all_Tide_type.currentIndex() == 0:
             self.Tide_types = ['大潮', '中潮', '小潮']
         else:
@@ -951,16 +1017,20 @@ class Current_Tab(QWidget):
             self.ceng_count = 6
         else:
             self.ceng_count = 3
-        if point_names:
-            point_names = point_names.split(sep=',')
-            if len(point_names) != self.Point_count.value():
-                QMessageBox.information(self, '通知',
-                                        "请将站点名称用“,”分隔，并与测点数量相对应")
-                return None
+        try:
+            print(str(self.Points))
+        except:
+            point_names = self.change_Point_name.text()
+            if point_names:
+                point_names = point_names.split(sep=',')
+                if len(point_names) != self.Point_count.value():
+                    QMessageBox.information(self, '通知',
+                                            "请将站点名称用“,”分隔，并与测点数量相对应")
+                    return None
 
-            self.Points = point_names
-        else:
-            self.Points = ['P' + str(x) for x in range(1, self.Point_count.value() + 1)]
+                self.Points = point_names
+            else:
+                self.Points = ['P' + str(x) for x in range(1, self.Point_count.value() + 1)]
 
         if self.sites_tab.tabText(0) == '未载入潮流数据':
             self.sites_tab.removeTab(0)
@@ -968,32 +1038,107 @@ class Current_Tab(QWidget):
         for i in self.Points:
             self.Point_control_creat(i)
 
+    def process_excel_data(self,c_data):
+        QApplication.processEvents()
+        threads = []
+        for _,i in c_data.data.items():
+            for _,ii in i.items():
+                one_thread = Process_excel_data_thread(ii)
+                threads.append(one_thread)
+        for one in threads:
+            one.start()
+        #report_data_process = QThread()
+        second = 0
+
+        print(threads[-1].isFinished())
+
+        while not threads[-1].isFinished():
+            time.sleep(1)
+            print(second)
+            second +=1
+            pass
+        sig.msg_to_show.emit('各测站预处理数据结束，请稍等')
+        print('ok~! '*10)
+        return 0
+
+    def import_from_report_click(self):
+
+        self.current_report_file,_ = QFileDialog.getOpenFileName(self,"选取潮流报表文件","","Excel文件(*.xlsx)")
+        if not self.current_report_file:
+            return 0
+        c_excel = Read_Report(self.current_report_file)
+        #self.Points = list(c2.points)
+
+        self.Point_count.setValue(len(c_excel.points))
+        if len(c_excel.tide_type) == 3:
+            self.all_Tide_type.setCurrentIndex(0)
+        else:
+            self.all_Tide_type.setCurrentIndex(1)
+        self.Points = list(c_excel.points)
+        self.confirm_point()
+
+        #设置各点的流向
+        Excel_angles = {}
+        for P_name in c_excel.points:
+            ang = self.set_Angles_of_excel_data(P_name)
+            Excel_angles.update({P_name:ang})
+            c_excel.setPoint_ang(P_name,ang = ang)
+
+        sig.msg_to_show.emit('正在处理潮流数据，请稍候')
+        #读取各自ang结束
+        self.process_excel_data(c_excel) #流速数据处理
+
+        for Point_Name,Contral in self.Point_control.items():
+            for tide in c_excel.tide_type:
+                Contral.One_tide_file_open(is_format_reprot=True,reportFile=self.current_report_file,tideType = tide,angle=Excel_angles[Point_Name],data = c_excel.data[Point_Name][tide])
+
+        sig.msg_to_show.emit('潮流报表数据处理结束')
+        print('ok')
+
+    def set_Angles_of_excel_data(self,Point_Name):
+            d_angle, ok = QInputDialog.getDouble(self,"请输入"+Point_Name+"主流向",'落潮流向为正值，涨潮流向为负值',0,-360,360,2)
+            if ok:
+                sig.msg_to_show.emit('成功将测点'+Point_Name+'主流向设置成为'+ str(d_angle))
+            return d_angle
+
+    def Q_Table(self):
+        self.tableWidget = QTableWidget()
+        self.tableWidget.setRowCount(self.Point_count.value())
+        self.tableWidget.setColumnCount(2)
+        for i in range(self.Point_count.value()):
+            self.tableWidget.setItem(i,0,QTableWidgetItem('a'))
+        self.tableWidget.show()
     def Point_control_creat(self, Point):
         one_point_tab = Point_Tab(Point, tide_types=self.Tide_types, cengshu=self.ceng_count)
         self.Point_control.update({Point: one_point_tab})
         self.sites_tab.addTab(one_point_tab, Point)
 
     def open_bed_file(self):
-        self.pre_bed_fileName, _ = QFileDialog.getOpenFileName(self, "选取待分层文件", "", "CSV文档(*.csv);;Excel文件(*.xlsx)",
+        try :
+            del self.beding_current
+        except:
+            pass
+        self.pre_bed_fileName, _ = QFileDialog.getOpenFileName(self, "选取待分层文件", "", "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)",
                                                                options=self.options)
         if self.pre_bed_fileName:
             self.beding_current = Current_pre_process(filename=self.pre_bed_fileName, is_VD=self.if_vd.isChecked())
             sig.msg_to_show.emit('文件载入成功')
 
     def save_bedded_file_click(self):
-        fileName, _ = QFileDialog.getSaveFileName(self, '保存分层文件路径', self.pre_bed_fileName, "CSV文档(*.csv)",
+        fileName, _ = QFileDialog.getSaveFileName(self, '保存分层文件路径', self.pre_bed_fileName, "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)",
                                                   options=self.options)
         if fileName:
             self.beding_current.all_fenceng(bin=self.bin_height.value(), first_bin=self.first_bin.value(),
                                             top_ratio=self.top_ratio.value(), button_ratio=self.button_ratio.value(),
                                             reverse=self.if_reverse.isChecked())
-            self.beding_current.save_result(outfile=fileName, V_D=self.if_save_VD)
+            self.beding_current.save_result(outfile=fileName, V_D=self.if_save_VD,
+                                            mag_declination=self.mag_declination.value())
             QMessageBox.information(self, '通知',
                                     "文件转化结束")
             sig.msg_to_show.emit("文件转化结束")
 
     def open_current_file(self):
-        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", '', "逗号分割文档 (*.csv)", options=self.options)
+        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", '', "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)", options=self.options)
         if fileName:
             self.filename = fileName
             return fileName
@@ -1019,9 +1164,9 @@ class Current_Tab(QWidget):
 
     def vd_to_en(self):
         options = QFileDialog.Options()
-        vd_fileName, _ = QFileDialog.getOpenFileName(self, "选取流速流向格式潮流文件", "", "csv文档 (*.csv);;Excel文件(*.xlsx)",
+        vd_fileName, _ = QFileDialog.getOpenFileName(self, "选取流速流向格式潮流文件", "", "逗号分割文档(utf-8) (*.csv);;Excel文件(*.xlsx)",
                                                      options=options)
-        ne_fileName, _ = QFileDialog.getSaveFileName(self, "保存为分向流速格式潮流文件", "", "csv文档 (*.csv)",
+        ne_fileName, _ = QFileDialog.getSaveFileName(self, "保存为分向流速格式潮流文件", "", "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)",
                                                      options=options)
         try:
             vd = Current_pre_process(filename=vd_fileName, is_VD=True)
@@ -1033,9 +1178,9 @@ class Current_Tab(QWidget):
 
     def ne_to_vd(self):
         options = QFileDialog.Options()
-        ne_fileName, _ = QFileDialog.getOpenFileName(self, "选取分向流速格式潮流文件", "", "csv文档 (*.csv);;Excel文件(*.xlsx)",
+        ne_fileName, _ = QFileDialog.getOpenFileName(self, "选取分向流速格式潮流文件", "", "逗号分割文档(utf-8) (*.csv);;Excel文件(*.xlsx)",
                                                      options=options)
-        vd_fileName, _ = QFileDialog.getSaveFileName(self, "保存为流速流向格式潮流文件", dir_of_file(ne_fileName), "csv文档 (*.csv)",
+        vd_fileName, _ = QFileDialog.getSaveFileName(self, "保存为流速流向格式潮流文件", dir_of_file(ne_fileName), "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)",
                                                      options=options)
         try:
             ne = Current_pre_process(filename=ne_fileName, is_VD=False)
@@ -1045,6 +1190,52 @@ class Current_Tab(QWidget):
         except:
             pass
 
+    def draw_current_cad(self):
+        self.gen_all_current_out()
+
+        def end_point(x, y, velocity, direction, parameter):
+            v_east = velocity * np.sin(direction / 180 * np.pi)
+            v_north = velocity * np.cos(direction / 180 * np.pi)
+            return [x + v_east * parameter, y + v_north * parameter]
+
+        def plot_line(x, y, vs, ds, tuceng, parameter,drawing):
+            for v, d in zip(vs, ds):
+                line = dxf.line((x, y), end_point(x, y, v, d, parameter))
+                line['layer'] = tuceng
+                drawing.add(line)
+                # layer_name = dxf.layer(cengshu+self.tide_type)
+                # drawing.layers.add(layer_name)
+        def select_positions_file(self):        
+            self.position_file,_ = QFileDialog.getOpenFileName(self,"选取位置文件","","Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)")
+            if "csv" in self.position_file:
+                self.positions = pandas.read_csv(self.position_file,usecols=['name','x','y'])
+            else:
+                self.positions = pandas.read_excel(self.position_file, columns=['name', 'x', 'y'])
+        try:
+            if(self.positions):
+                pass
+        except:
+            self.select_positions_file()
+
+        self.cad_file,_ = QFileDialog.getSaveFileName(self,"选取cad文件保存路径","","DXF文档(*.dxf)")
+        drawing = dxf.drawing(self.cad_file)
+        named_points = []
+        for pos in self.positions.itertuples():
+            c_of_one_point = [point_c for _,point_c in c.items() if point_c.point == pos.name]
+            for every_c in c_of_one_point:
+                every_c.location(x = pos.x, y = pos.y)
+                data = every_c.ceng_processed[self.draw_cengshu.currentIndex()].data
+                data = data[data['t'].apply(lambda t: t.minute) == 0]
+                plot_line(every_c.x,every_c.y, data['v'], data['d'],tuceng= every_c.tide_type+self.draw_cengshu.currentText(), parameter=self.cad_parameter.value(),drawing=drawing)
+
+            if every_c.point not in named_points:
+                text = dxf.text(every_c.point,insert=(every_c.x,every_c.y),height=self.cad_parameter.value()*10,)
+                text['layer'] = ['TEXT']
+                text['color'] = 5
+                drawing.add(text)
+                named_points.append(every_c.point)
+        drawing.save()
+        QMessageBox.information(self,'通知',"流速矢量图绘制完成")
 
 class Wind_Tab(QWidget):
     def __init__(self, parent=None):
@@ -1073,7 +1264,7 @@ class Wind_Tab(QWidget):
     def preprocess_wind(self):
         toCompileFilenames = QFileDialog.getOpenFileNames(self, '原始气象数据', "", "DAT文件（*.dat)",
                                                           options=QFileDialog.Options())
-        toSaveFilenames = QFileDialog.getSaveFileName(self, '转化后的气象数据","","csv文档(*.csv)', options=QFileDialog.Options())
+        toSaveFilenames = QFileDialog.getSaveFileName(self, '转化后的气象数据","","逗号分割文档(utf-8)(*.csv)', options=QFileDialog.Options())
         # process_file(toCompileFilenames,toSaveFilenames)
 class Wave_tab(QWidget):
     def __init__(self, parent=None):
@@ -1127,13 +1318,15 @@ class Point_Tab(QWidget):
 
         self.angle = QDoubleSpinBox()
         self.angle.setRange(0, 359.99)
-        self.zhang_or_luo = QCheckBox('落潮流')
-        self.zhang_or_luo.setToolTip("打勾时输入为落潮主流向，否则为涨潮流向")
-        self.zhang_or_luo.setChecked(True)
+        self.zhang_or_luo = QCheckBox('涨潮流')
+        self.zhang_or_luo.setToolTip("打勾时输入为涨潮主流向，否则为落潮流向")
+        self.zhang_or_luo.setChecked(False)
         self.load_Spring_file = QPushButton('载入大潮文件', clicked=self.Spring_file_open)
         self.load_Mid_file = QPushButton('载入中潮文件', clicked=self.Mid_file_open)
         self.load_Neap_file = QPushButton('载入小潮文件', clicked=self.Neap_file_open)
         self.clear_file_button = QPushButton('清除站点文件', clicked=self.clear_file)
+
+
         l_GroupLayout = QFormLayout()
         l_GroupLayout.addRow(self.angle)
         l_GroupLayout.addRow(self.zhang_or_luo)
@@ -1141,6 +1334,7 @@ class Point_Tab(QWidget):
         if len(self.tide_types) == 3:
             l_GroupLayout.addRow(self.load_Mid_file)
         l_GroupLayout.addRow(self.load_Neap_file)
+
 
         l_GroupLayout.addRow(self.clear_file_button)
 
@@ -1152,27 +1346,37 @@ class Point_Tab(QWidget):
         layout.addWidget(self.tabs)
         self.setLayout(layout)
 
-    def One_tide_file_open(self):
-        options = QFileDialog.Options()
-        fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", '', "逗号分隔文档 (*.csv)", options=options)
-        if fileName:
-            self.filename = fileName
+    def One_tide_file_open(self,is_format_reprot = False,ZhangorLuo = False,reportFile = None,tideType = None,angle = None,data = None):
+        if not is_format_reprot:
+            options = QFileDialog.Options()
+            fileName, _ = QFileDialog.getOpenFileName(self, "选取文件", self.filename[:-8], "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)", options=options)
+            if fileName:
+                self.filename = fileName
 
-            def generate_tab(tide_type, **kwargs):
-                sig.msg_to_show.emit('正在载入' + tide_type + '文件,请稍候')
-                tab = Single_Tide_tab(filename=fileName, tide_type=tide_type, angle=self.angle.value(),
-                                      zhang_or_luo=self.zhang_or_luo.isChecked(), Point=self.point,
-                                      cengshu=self.cengshu)
-                self.tides_control.update({tide_type: tab})
-                self.tabs.addTab(tab, tide_type)
-                self.tabs.setToolTip('源文件为' + fileName)
-                sig.load_current_file_done.emit(self.point, tide_type)
-                sig.msg_to_show.emit(self.point + '站' + tide_type + '数据文件载入结束，请继续操作')
+                def generate_tab(tide_type, **kwargs):
+                    sig.msg_to_show.emit('正在载入' + tide_type + '文件,请稍候')
+                    tab = Single_Tide_tab(filename=fileName, tide_type=tide_type, angle=self.angle.value(),
+                                          zhang_or_luo=self.zhang_or_luo.isChecked(), Point=self.point,
+                                          cengshu=self.cengshu)
+                    self.tides_control.update({tide_type: tab})
+                    self.tabs.addTab(tab, tide_type)
+                    self.tabs.setTabToolTip('源文件为' + fileName)
+                    sig.load_current_file_done.emit(self.point, tide_type)
+                    sig.msg_to_show.emit(self.point + '站' + tide_type + '数据文件载入结束，请继续操作')
 
-            return generate_tab
-        else:
-            x = lambda xx: print(xx)
-            return x
+                return generate_tab
+            else:
+                x = lambda xx: print(xx)
+                return x
+
+        else:#从报表中导入,主要参数均从函数入口传递
+            tab = Single_Tide_tab(filename=reportFile, tide_type=tideType, angle=angle,
+                                  zhang_or_luo=ZhangorLuo, Point=self.point,
+                                  cengshu=self.cengshu,is_format_reprot = is_format_reprot,data = data)
+            self.tides_control.update({tideType: tab})
+            self.tabs.addTab(tab, tideType)
+            sig.load_current_file_done.emit(self.point,tideType)
+            #self.tabs.setTabToolTip('源文件为' + reportFile)
 
     def clear_file(self):
         self.tides_control.clear()
@@ -1197,8 +1401,8 @@ class Point_Tab(QWidget):
         self.One_tide_file_open()("中潮")
 
 
-class Single_Tide_tab(QWidget):
-    def __init__(self, filename, Point, cengshu, tide_type, angle, zhang_or_luo, parent=None):
+class Single_Tide_tab(QWidget):#需根据从报表导入重构
+    def __init__(self, filename, Point, cengshu, tide_type, angle, zhang_or_luo, parent=None,is_format_reprot = False,data = None):
         super(Single_Tide_tab, self).__init__(parent)
         self.Point = Point
         self.cengshu = cengshu
@@ -1209,16 +1413,20 @@ class Single_Tide_tab(QWidget):
         self.zhang_or_luo = zhang_or_luo
         self.filename = filename
 
-        c.update({self.Point + self.tide_type: Single_Tide_Point(filename=self.filename, tide_type=tide_type,
-                                                                 point=Point, angle=angle, zhang_or_luo=zhang_or_luo,
-                                                                 cengshu=cengshu)})
-        preprocess_thread = Thread(target=c[self.Point + self.tide_type].preprocess)
-        second = 0
-        preprocess_thread.start()
-        while preprocess_thread.is_alive():
-            sig.msg_to_show.emit('正在对' + self.tide_type + '文件进行预处理，用时' + str(round(second, 1)) + '秒')
-            time.sleep(0.1)
-            second += 0.1
+        if is_format_reprot:
+            c.update({self.Point + self.tide_type: data})
+
+        else:
+            c.update({self.Point + self.tide_type: Single_Tide_Point(filename=self.filename, tide_type=tide_type,
+                                                                     point=Point, angle=angle, zhang_or_luo=zhang_or_luo,
+                                                                     cengshu=cengshu)})
+            preprocess_thread = Thread(target=c[self.Point + self.tide_type].preprocess)
+            second = 0
+            preprocess_thread.start()
+            while preprocess_thread.is_alive():
+                sig.msg_to_show.emit('正在对' + self.tide_type + '文件进行预处理，用时' + str(round(second, 1)) + '秒')
+                time.sleep(0.1)
+                second += 0.1
 
         self.layout_element()
 
@@ -1246,14 +1454,24 @@ class Single_Tide_tab(QWidget):
         out = c[self.Point + self.tide_type].output_all()
         options = QFileDialog.Options()
         savefileName, _ = QFileDialog.getSaveFileName(self, "保存" + self.Point + self.tide_type + "特征值", "",
-                                                      "Excel文件 (*.csv)", options=options)
+                                                      "Excel文件(*.xlsx);;逗号分割文档(utf-8)(*.csv)", options=options)
         if savefileName:
-            out.to_csv(savefileName)
+            if "csv" in savefileName:
+                out.to_csv(savefileName)
+            else:
+                out.to_excel(savefileName)
 
+class Process_excel_data_thread(QThread):
+    def __init__(self,one_tide_point):
+        QThread.__init__(self)
+        self.data = one_tide_point
+    def run(self):
+        self.data.preprocess()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    ex = M_window()
 
+    app = QApplication(sys.argv)
+    app.setStyle('Fusion')
+    ex = M_window()
     ex.show()
     sys.exit(app.exec_())
