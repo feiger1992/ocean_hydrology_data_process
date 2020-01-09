@@ -4,11 +4,16 @@ import pandas
 import numpy as np
 import dateutil
 
+
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 
-import ttide as tt
+#import ttide as tt
+
+import utide
+from matplotlib.dates import date2num
+
 
 import xlsxwriter
 import numpy
@@ -25,6 +30,8 @@ str_time_from_seconds = lambda seconds: str(round(divmod(seconds, 3600)[0])) + '
 str_time_from_second2 = lambda t: '%s小时%s分钟' % (t.seconds // 3600, (t.seconds % 3600) // 60) if (
                                                                                                 t.seconds % 3600) % 60 < 30 else  '%s小时%s分钟' % (
 t.seconds // 3600, (t.seconds % 3600) // 60 + 1)
+constit_tide_level = ['O1', 'Q1', 'P1', 'K1', 'N2', 'M2', 'K2', 'S2', 'M4', 'MS4', 'M6']
+pandas.options.display.float_format = '{:,.2f}'.format
 
 def say_out(xxx):
     # 错误提示
@@ -52,11 +59,12 @@ class Tide(object):
         self.out = {}
         self.outtxt = {}
         self.sites = xlrd.open_workbook(filename=filename).sheet_names()
-        for i in self.sites:
-            self.data[i] = pandas.read_excel(self.filename, sheetname=i)
-            self.data[i] = self.data[i][['time', 'tide']]
         if only_first_sheet:
             self.sites = self.sites[:1]
+        for i in self.sites:
+            self.data[i] = pandas.read_excel(self.filename, sheet_name=i)
+            self.data[i] = self.data[i][['time', 'tide']]
+
 
     def tide_statics(self, site=None):
         if site:
@@ -97,7 +105,7 @@ class Tide(object):
 
     def preprocess(self,s,threshold=10):
         try:
-            self.tide_sheet = pandas.read_excel(self.filename, sheetname=s)
+            self.tide_sheet = pandas.read_excel(self.filename, sheet_name=s)
             if self.tide_sheet.empty:
                 raise ValueError
 
@@ -109,17 +117,19 @@ class Tide(object):
         except:
             say_out('Please Check Your sheets name of the File')
             raise EOFError
+        self.tide_sheet = self.tide_sheet[['time', 'tide']]
         temp_data = self.tide_sheet
         t = []
-        if isinstance(temp_data.time[1], pandas.tslib.Timestamp) or isinstance(temp_data.time[1],
+        if isinstance(temp_data.time[1], pandas.Timestamp) or isinstance(temp_data.time[1],
                                                                                datetime.datetime):
             t = temp_data.time.dt.round('1min')
         else:
             for x in temp_data.time:
                 t.append(dateutil.parser.parse(x))
         temp_data['format_time'] = t
-        temp_data['tide_init'] = temp_data.tide / 100
-        temp_data = temp_data.dropna()
+        if temp_data.tide.max() - temp_data.tide.min() > 10:
+            temp_data['tide_init'] = temp_data.tide / 100
+        temp_data = temp_data.dropna(axis=1)
         self.deltatime = t[1] - t[0]
         if t[0] + (t[1] - t[0]) * (len(t) - 1) != t[len(t) - 1]:
             i_temp = 0
@@ -175,10 +185,24 @@ class Tide(object):
             temp_data.tide.values[:-1] < temp_data.tide.values[1:], True]
         temp_data['if_max'] = np.r_[True, temp_data.tide.values[1:] > temp_data.tide.values[:-1]] & np.r_[
             temp_data.tide.values[:-1] > temp_data.tide.values[1:], True]
-        temp_data.set_value(temp_data.index.max(), 'if_min', False)
-        temp_data.set_value(temp_data.index.max(), 'if_max', False)
-        temp_data.set_value(temp_data.index.min(), 'if_max', False)
-        temp_data.set_value(temp_data.index.min(), 'if_min', False)
+
+        ##上述方法对一分钟数据不管用2019-3-27尝试用for 循环
+        """
+        for i in range(3, len(temp_data) - 3):
+            if temp_data.iloc[i,1] <  temp_data.iloc[i - 1,1]  and temp_data.iloc[i,1] < temp_data.iloc[i + 1,1]:
+                temp_data.iloc[i,- 2 ]  = True
+            if temp_data.iloc[i,1] >  temp_data.iloc[i - 1,1]  and temp_data.iloc[i,1] > temp_data.iloc[i + 1,1]:
+                temp_data.iloc[i,- 1 ]  = True
+        
+        """
+
+        temp_data.at[temp_data.index.max(), 'if_min'] = False
+        temp_data.at[temp_data.index.max(), 'if_max'] = False
+        temp_data.at[temp_data.index.min(), 'if_min'] = False
+        temp_data.at[temp_data.index.min(), 'if_max'] = False
+
+        #temp_data.set_value(temp_data.index.max(), 'if_max', False)
+
 
         temp_data['diff'] = np.nan
 
@@ -213,11 +237,13 @@ class Tide(object):
         #####根据潮差与涨落潮历时筛选
         temp_data = calculate_time_diff(temp_data=temp_data)
 
-        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'diff'] = np.nan
-        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'if_max'] = False
-        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'if_min'] = False
-        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'raising_time'] = 0
-        temp_data.loc[temp_data[temp_data['diff'] < 10].index, 'ebb_time'] = 0
+        temp_data.loc[temp_data[temp_data['diff'] < 1].index, 'if_max'] = False
+        temp_data.loc[temp_data[temp_data['diff'] < 1].index, 'if_min'] = False
+        temp_data.loc[temp_data[temp_data['diff'] < 1].index, 'raising_time'] = np.nan
+        temp_data.loc[temp_data[temp_data['diff'] < 1].index, 'ebb_time'] = np.nan
+        temp_data.loc[temp_data[temp_data['diff'] < 1].index, 'diff'] = np.nan
+
+        #2018/11/4 潮差从5改为20
 
         temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'diff'] = np.nan
         temp_data.loc[temp_data[temp_data['raising_time'] < datetime.timedelta(hours=2)].index, 'if_max'] = False
@@ -232,18 +258,25 @@ class Tide(object):
             temp_data.loc[temp_data.if_max == True]).sort_index().index
         count_filtertime = 0
         count = 0
+        count2 = 0
         while (len(temp_data.loc[temp_data.if_min == True]) != len(temp_data.loc[temp_data.if_max == True])) or (
                 count > 20 and abs(
-                    len(temp_data.loc[temp_data.if_min == True]) - len(temp_data.loc[temp_data.if_max == True])) > 28):
+                    len(temp_data.loc[temp_data.if_min == True]) - len(temp_data.loc[temp_data.if_max == True])) > 2):
             count += 1
             print('第' + str(count) + '次筛选')
             print('低潮潮位个数' + str(len(temp_data.loc[temp_data.if_min == True])))
             print('高潮潮位个数' + str(len(temp_data.loc[temp_data.if_max == True])))
+
             if ((len(temp_data.loc[temp_data.if_min == True]) - len(temp_data.loc[temp_data.if_max == True]) == 1) or (
                             len(temp_data.loc[temp_data.if_min == True]) - len(
-                            temp_data.loc[temp_data.if_max == True]) == -1)):
-                print('极值只多一个，筛选结束')
-                break
+                            temp_data.loc[temp_data.if_max == True]) == -1)) or count < 30:
+                print('极值只多一个')
+                count2 += 1
+                print('进行第'+str(count2)+'次复查')
+                if count2 == 3:
+                    print("筛选结束")
+                    break
+
             print('进行高低潮筛选————————————————————————————————')
 
             for i in range(1, len(switch) - 1):
@@ -280,12 +313,30 @@ class Tide(object):
         return temp_data
 
 
-    def harmonic_analysis(self, site, if_init=True):
+    def harmonic_analysis_old(self, site, if_init=True):#2019/9/4弃用
+        data_h = self.data[site]
+        data_h['min'] = data_h.index
+        data_h['min']  = data_h['min'].apply(lambda x: x.minute)
+        data_h = data_h[data_h['min'] == 0]
+
         if if_init:
-            self.harmonic_result.update({site:tt.t_tide(self.data[site]['tide_init'], dt=self.deltatime.total_seconds() / 3600)})
+            self.harmonic_result.update({site : tt.t_tide(data_h['tide_init'], dt= 1 ,lat = 30)})
+            ###维度采用长江口地区
         else:
             self.harmonic_result.update(
-                {site: tt.t_tide(self.data[site]['tide'], dt=self.deltatime.total_seconds() / 3600)})
+                {site: tt.t_tide(data_h['tide'], dt= 1,lat=30)})
+
+    def harmonic_analysis(self,site,if_init = True,time_zone = 8,lat = 30):#19年9月启用
+
+        ana_data = self.data[site]
+        ana_data['UTC_time'] = ana_data['time'] - pandas.Timedelta(time_zone,'h')
+        time = date2num(ana_data['UTC_time'].values)
+        if if_init:
+            result = utide.solve(time, ana_data.tide_init.values, lat=lat, constit=constit_tide_level)
+        else:
+            result = utide.solve(time, ana_data.tide.values, lat=lat, constit=constit_tide_level)
+        self.harmonic_result.update({site: pandas.DataFrame(data = [result['A'],result['A_ci'],result['g'],result['g_ci']],columns = result['diagn']['name'],index = ['振幅','振幅可置信区间','迟角','迟角可置信区间']).to_string()})
+
 
     def plot_tide_compare(self, site=None):
         if not site:
@@ -307,17 +358,17 @@ class Tide(object):
         line3, = ax.plot(self.tt1, self.hh1, marker='*', ls='', markersize=4, color='red', label='高潮时刻')
         line4, = ax.plot(self.tt2, self.hh2, marker='*', ls='', markersize=4, color='green', label='低潮时刻')
 
-
-        ax.xaxis.set_major_locator(day)
-        ax.xaxis.set_major_formatter(dayFmt)
-        ax.xaxis.set_minor_locator(hour)
+        #plt.xlabel('时间', fontsize=18)
+        #ax.xaxis.set_major_locator(day)
+        #ax.xaxis.set_major_formatter(dayFmt)
+        #ax.xaxis.set_minor_locator(hour)
         # ax.legend(handles=[line1, line2],loc = 2,ncol=2, fontsize = 5)
         # ax.legend(handles=[line1, line2], loc=3,bbox_to_anchor = (0,1,0.5,1.1))
         ax.legend(handles=[line1, line2, line3, line4], fontsize=5)
         plt.title(site)
         ax.set_ylabel('潮位')
         self.compare_fig = fig
-        # return fig
+        return fig
     def sitedata(self, sitename):
         return self.data.get(sitename)
 
@@ -356,6 +407,12 @@ class Process_Tide(Tide):
         chaogao = "潮高"
         self.file = outfile
         excel_input = xlsxwriter.Workbook(outfile)
+
+        if time_start == pandas.Timestamp(2000,1,1,0,0,0):
+            time_start = None
+        if time_end == pandas.Timestamp(2000,1,1,0,0,0):
+            time_end = None
+
         ###########################################基本格式
         format_title1 = excel_input.add_format({
             'bold': 1,
@@ -526,7 +583,7 @@ class Process_Tide(Tide):
 
             for mon in x.month[site]:
 
-                if time_start and time_end:
+                if time_start and time_end :
                     time_start = pandas.Timestamp(time_start)
                     time_end = pandas.Timestamp(time_end)
                     mon = mon.loc[mon.format_time < time_end]
@@ -625,7 +682,7 @@ class Process_Tide(Tide):
                     else:
                         sheet.write(row1 + 5 + hanghanghang_1, 28 + move1, high.loc[i, ['tide']] * alpha, format_num)
 
-                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(round(alpha * high.tide.max(), 1)),
+                sheet.write(row1 + 6 + hangshu, 2, '月 最 高 高 潮 = ' + str(round(alpha * high.tide.max(), 0)),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 2,
@@ -665,12 +722,12 @@ class Process_Tide(Tide):
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num_r)
                     else:
                         sheet.write(row1 + 5 + hanghanghang_2, 32 + move1, low.loc[i, 'tide'] * alpha, format_num)
-                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(round(alpha * low.tide.min(), 1)),
+                sheet.write(row1 + 6 + hangshu, 9, '月 最 低 低 潮 = ' + str(round(alpha * low.tide.min(), 0)),
                             format_cn_a_left)
 
                 sheet.write(row1 + 7 + hangshu, 9,
-                            '潮 时 = ' + str(high.tide.idxmin().month) + '月' + str(high.tide.idxmin().day) + '日' + str(
-                                high.tide.idxmin().hour) + '时' + str(high.tide.idxmin().minute) + '分',
+                            '潮 时 = ' + str(low.tide.idxmin().month) + '月' + str(low.tide.idxmin().day) + '日' + str(
+                                low.tide.idxmin().hour) + '时' + str(low.tide.idxmin().minute)  + '分',
                             format_cn_a_left)
 
                 self.low = mon.loc[mon.groupby(mon.if_min).groups[True], ['tide', 'format_time', 'ebb_time']]
@@ -689,11 +746,11 @@ class Process_Tide(Tide):
                                   format_cn_a_left2)
                 ###############################################################################
                 sheet.write(row1 + 6 + hangshu, 15,
-                            '月 平 均 潮 差 = ' + str(round(alpha * numpy.mean(mon['diff'].dropna().values), 1)),
+                            '月 平 均 潮 差 = ' + str(round(alpha * numpy.mean(mon['diff'].dropna().values), 0)),
                             format_cn_a_left)
-                sheet.write(row1 + 7 + hangshu, 15, '月 最 大 潮 差 = ' + str(round(mon['diff'].max() * alpha, 1)),
+                sheet.write(row1 + 7 + hangshu, 15, '月 最 大 潮 差 = ' + str(round(mon['diff'].max() * alpha, 0)),
                             format_cn_a_left)
-                sheet.write(row1 + 8 + hangshu, 15, '月 最 小 潮 差 = ' + str(round(mon['diff'].min() * alpha, 1)),
+                sheet.write(row1 + 8 + hangshu, 15, '月 最 小 潮 差 = ' + str(round(mon['diff'].min() * alpha, 0)),
                             format_cn_a_left1)
                 #############################################################################
                 r_1 = row1 + 7
@@ -782,7 +839,16 @@ class Process_Tide(Tide):
         if len(han_zi) == 3:
             return han_zi.replace('二十', '廿')
         if len(han_zi) == 1:
-            return '初' + han_zi
+            if han_zi == "一":
+                m =  pycnnum.num2cn(lunardate.LunarDate.fromSolarDate(d.year, d.month, d.day).month)
+                if len(m) == 1:
+                    if m == "一":
+                        m = "正"
+                    return  m + "月"
+                else:
+                    m.replace("一十一","冬").replace("一十二","腊").replace("一十",'十') + "月"
+            else:
+                return '初' + han_zi
         else:
             return han_zi
 
@@ -810,25 +876,10 @@ class Process_Tide(Tide):
         self.html.update({site:h})
 
 
+
 if __name__ == "__main__":
-    filename = r"E:\★★★★★项目★★★★★\★★★★★坦桑尼亚2017★★★★★\坦桑尼亚水文测验临时成果\程序阅读文件.xlsx"
-    t = Process_Tide(filename)
-    t.preprocess('T1', 50)
-    t.output(r"C:\Users\Feiger\Desktop\2.xlsx", reference_system='当地基面')
-    # t.out_put_mid_data("E:\★★★★★项目★★★★★\杂\嵊泗中间结果.xlsx", '嵊泗')
-
-    # t.output(r"E:\★★★★★项目★★★★★\杂\嵊泗报表222.xlsx",reference_system='当地基面')
-    # t.display()
-
-    t.tide_statics()
-    """
-        with open(r"E:\★★★★★CODE★★★★★\程序调试对比\潮汐模块\对比潮位特征值（东水港村）\中间数据2012-3.html", 'w') as f:
-            for _,v in t.html.items():
-                f.write(v)
-        excel_writer = pandas.ExcelWriter(filename2)
-        for key,v in t.data.items():
-            if '原始数据' not in key:
-                v.to_excel(excel_writer,sheet_name=key)
-                excel_writer.save()
-        t.output(filename3)"""
+    filename = r"E:\★★★★★项目★★★★★\★★★★埃及汉纳维6000mw清洁煤电项目-水文测验★★★★\实测数据\数据资料--------\二、长期\3、潮位\⑵ 过程资料\10月-11月潮位.xlsx"
+    t = Process_Tide(filename,only_first_sheet=True)
+    t.preprocess(t.sites[0], 85)
+    print(t.harmonic_result)
     print('*****OK*****')
